@@ -1,24 +1,17 @@
 /* ============================================================
-   RAMIREZ GROUP — APP.JS (Fase 1)
+   RAMIREZ GROUP — APP.JS (Fase 1 + Fase 2)
    Restaurante y Pescadería Ramírez
    Autor: Oscar Polania | Cel: 3103230712
    ============================================================
-   Contiene la infraestructura compartida:
-   - Login (PIN rápido y documento)
-   - Inicio multi-negocio
-   - Menú principal del restaurante por rol
-   - PWA (instalación, service worker, auto-actualización)
-   - API helpers (apiGet / apiPost)
-   - Sonidos
-   - Navegación entre vistas
-   - Control de permisos por rol
-   - Almacenamiento local de sesión
+   Fase 1: Login, inicio multi-negocio, menú restaurante por rol,
+           PWA, API helpers, navegación, auto-update.
+   Fase 2: Vistas Catálogo, Mesas, Inventario.
    ============================================================ */
 
 /* ============================================================
    CONFIGURACIÓN — EDITAR ESTAS CONSTANTES
    ============================================================ */
-const API_BASE = 'https://script.google.com/macros/s/AKfycbx25rbzh5YOXcX_w-Ex6TTw5s5bfeDOy_y1elfltx4VFfCtUxsyCmxUKPo3OPe57PEK/exec'; // <-- Pega aquí la URL /exec del Apps Script
+const API_BASE = 'https://script.google.com/macros/s/AKfycbx25rbzh5YOXcX_w-Ex6TTw5s5bfeDOy_y1elfltx4VFfCtUxsyCmxUKPo3OPe57PEK/exec';
 
 const firebaseConfig = {
   apiKey: "AIzaSyC5B-1yMbzyfTdtsQ9gtKU2886uzUluIn4",
@@ -34,7 +27,7 @@ const firebaseConfig = {
 /* ============================================================
    CONSTANTES GENERALES
    ============================================================ */
-const APP_VERSION = '2026.05.08.1';   // se sobreescribe al leer version.json
+const APP_VERSION = '2026.05.08.2';   // se sobreescribe al leer version.json
 const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
@@ -62,6 +55,8 @@ const ICONOS = {
   luna:       'https://res.cloudinary.com/dqqeavica/image/upload/v1778186305/luna_mfjvx6.webp',
   mesero:     'https://res.cloudinary.com/dqqeavica/image/upload/v1778186305/mesero_fs2r5u.webp'
 };
+
+const PLACEHOLDER_PRODUCTO = 'https://res.cloudinary.com/dqqeavica/image/upload/v1778186302/plato_cmnvge.webp';
 
 /* ============================================================
    ESTADO GLOBAL
@@ -105,6 +100,22 @@ function fmtPesos(n) {
   return '$ ' + num.toLocaleString('es-CO', { maximumFractionDigits: 0 });
 }
 
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function fmtFechaCorta(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) +
+           ' ' + d.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+  } catch (_) { return '—'; }
+}
+
 function showView(viewId) {
   $$('.view').forEach(v => v.classList.remove('active'));
   const v = document.getElementById('view-' + viewId);
@@ -112,6 +123,11 @@ function showView(viewId) {
     v.classList.add('active');
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
+}
+
+function rolEs(...roles) {
+  const r = String(state.user?.rol || '').toUpperCase();
+  return roles.map(x => String(x).toUpperCase()).indexOf(r) >= 0;
 }
 
 /* ============================================================
@@ -478,19 +494,19 @@ function irAMenuRestaurante() {
       key: 'catalogo', titulo: 'Catálogo', desc: 'Productos y precios',
       icono: ICONOS.plato,
       roles: ['SUPERUSUARIO','ADMINISTRADOR','CONTADOR','MESERO','COCINA','CAJA'],
-      view: 'pendiente', placeholder: 'Catálogo de productos'
+      view: 'catalogo'
     },
     {
       key: 'inventario', titulo: 'Inventario', desc: 'Stock de bebidas',
       icono: ICONOS.botella,
       roles: ['SUPERUSUARIO','ADMINISTRADOR','CONTADOR'],
-      view: 'pendiente', placeholder: 'Inventario'
+      view: 'inventario'
     },
     {
       key: 'mesas', titulo: 'Mesas', desc: 'Configurar mesas',
       icono: ICONOS.mesa,
       roles: ['SUPERUSUARIO','ADMINISTRADOR'],
-      view: 'pendiente', placeholder: 'Configuración de mesas'
+      view: 'mesas'
     },
     {
       key: 'anclaje', titulo: 'Anclaje del día', desc: 'Cierre diario',
@@ -542,6 +558,12 @@ function irAMenuRestaurante() {
         $('#pendiente-title').textContent = t.placeholder;
         $('#pendiente-h2').textContent = t.placeholder;
         showView('pendiente');
+      } else if (t.view === 'catalogo') {
+        Catalogo.abrir();
+      } else if (t.view === 'mesas') {
+        Mesas.abrir();
+      } else if (t.view === 'inventario') {
+        Inventario.abrir();
       } else {
         showView(t.view);
       }
@@ -652,14 +674,14 @@ function setupInstall() {
 let _firebase = null;
 async function getFirebase() {
   if (_firebase) return _firebase;
-  if (!FIREBASE_CONFIG.databaseURL) return null;
+  if (!firebaseConfig.databaseURL) return null;
   // Carga dinámica desde CDN
   await Promise.all([
     cargarScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js'),
     cargarScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js')
   ]);
   // eslint-disable-next-line no-undef
-  if (!firebase.apps || !firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+  if (!firebase.apps || !firebase.apps.length) firebase.initializeApp(firebaseConfig);
   // eslint-disable-next-line no-undef
   _firebase = firebase;
   return _firebase;
@@ -674,6 +696,990 @@ function cargarScript(src) {
 }
 
 /* ============================================================
+   UTILIDAD: leer archivo como base64
+   ============================================================ */
+function fileToBase64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const result = String(r.result || '');
+      // Quitar el prefijo data:...;base64,
+      const idx = result.indexOf(',');
+      res(idx >= 0 ? result.substring(idx + 1) : result);
+    };
+    r.onerror = () => rej(new Error('No se pudo leer el archivo'));
+    r.readAsDataURL(file);
+  });
+}
+
+/* ============================================================
+   ============================================================
+   FASE 2 — VISTA CATÁLOGO
+   ============================================================
+   ============================================================ */
+const Catalogo = {
+  data: null,                  // { categorias, productos, modificadores, inventario }
+  filtroTexto: '',
+  expandidas: new Set(),       // ids de categorías expandidas
+
+  async abrir() {
+    showView('catalogo');
+    await this.cargar();
+  },
+
+  async cargar() {
+    startLoading();
+    try {
+      this.data = await apiGet('getCatalogo');
+      // Por defecto expandir la primera categoría con productos
+      if (this.expandidas.size === 0) {
+        const conProds = this.data.categorias.find(c =>
+          this.data.productos.some(p => p.categoriaId === c.id)
+        );
+        if (conProds) this.expandidas.add(conProds.id);
+      }
+      this.render();
+    } catch (e) {
+      alertErr('Error al cargar catálogo', e.message);
+    } finally {
+      stopLoading();
+    }
+  },
+
+  render() {
+    const puedeEditar = rolEs('SUPERUSUARIO', 'ADMINISTRADOR');
+    const fab = $('#catalogo-fab');
+    if (fab) fab.classList.toggle('hidden', !puedeEditar);
+
+    const cont = $('#catalogo-content');
+    if (!this.data) { cont.innerHTML = ''; return; }
+
+    const filtro = this.filtroTexto.trim().toLowerCase();
+    const cats = this.data.categorias;
+    const prodsPorCat = {};
+    this.data.productos.forEach(p => {
+      if (filtro) {
+        const hit = p.nombre.toLowerCase().includes(filtro) ||
+                    (p.descripcion || '').toLowerCase().includes(filtro);
+        if (!hit) return;
+      }
+      if (!prodsPorCat[p.categoriaId]) prodsPorCat[p.categoriaId] = [];
+      prodsPorCat[p.categoriaId].push(p);
+    });
+
+    if (filtro) {
+      // En modo búsqueda, expandir todas las que tengan resultados
+      cats.forEach(c => { if ((prodsPorCat[c.id] || []).length) this.expandidas.add(c.id); });
+    }
+
+    const visibles = cats.filter(c => filtro ? (prodsPorCat[c.id] || []).length : true);
+
+    if (!visibles.length) {
+      cont.innerHTML = `
+        <div class="card text-center">
+          <h3>Sin resultados</h3>
+          <p class="muted">No encontramos productos que coincidan con tu búsqueda.</p>
+        </div>`;
+      return;
+    }
+
+    cont.innerHTML = visibles.map(cat => {
+      const prods = prodsPorCat[cat.id] || [];
+      const expanded = this.expandidas.has(cat.id);
+      return `
+        <section class="cat-acordeon ${expanded ? 'open' : ''}" data-cat="${cat.id}">
+          <button class="cat-acordeon__head" data-toggle-cat="${cat.id}">
+            <span class="cat-acordeon__bullet" style="background:${cat.color || '#06402B'}"></span>
+            <span class="cat-acordeon__name">${escapeHtml(cat.nombre)}</span>
+            <span class="cat-acordeon__count">${prods.length}</span>
+            <svg class="cat-acordeon__chevron" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          <div class="cat-acordeon__body">
+            ${prods.length
+              ? `<div class="prod-grid">${prods.map(p => this.renderProductoCard(p, puedeEditar)).join('')}</div>`
+              : `<p class="muted" style="padding:8px 4px;">Sin productos en esta categoría.</p>`}
+          </div>
+        </section>
+      `;
+    }).join('');
+
+    // Bind acordeón
+    $$('[data-toggle-cat]', cont).forEach(b => {
+      b.addEventListener('click', () => {
+        const id = b.dataset.toggleCat;
+        if (this.expandidas.has(id)) this.expandidas.delete(id);
+        else this.expandidas.add(id);
+        this.render();
+      });
+    });
+
+    // Bind cards de producto
+    $$('[data-prod-edit]', cont).forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = b.dataset.prodEdit;
+        const p = this.data.productos.find(x => x.id === id);
+        if (p) this.abrirModalProducto(p);
+      });
+    });
+    $$('[data-prod-toggle]', cont).forEach(b => {
+      b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = b.dataset.prodToggle;
+        await this.toggleDisponible(id);
+      });
+    });
+  },
+
+  renderProductoCard(p, puedeEditar) {
+    const inv = this.data.inventario[p.id];
+    const stockBajo = inv && p.manejaStock && inv.stockActual <= inv.stockMinimo;
+    const agotado = !p.disponible;
+    const img = p.imagenUrl || PLACEHOLDER_PRODUCTO;
+    const mods = (this.data.modificadores[p.id] || []).length;
+    return `
+      <article class="prod-card ${agotado ? 'is-agotado' : ''}">
+        <div class="prod-card__img-wrap">
+          <img class="prod-card__img" src="${img}" alt="${escapeHtml(p.nombre)}"
+               loading="lazy" onerror="this.src='${PLACEHOLDER_PRODUCTO}'" />
+          ${agotado    ? `<span class="prod-badge badge-danger">Agotado</span>` : ''}
+          ${stockBajo && !agotado ? `<span class="prod-badge badge-warn">Stock bajo</span>` : ''}
+          ${p.tipo === 'RAPIDO' ? `<span class="prod-badge badge-rapido">⚡</span>` : ''}
+        </div>
+        <div class="prod-card__body">
+          <h4 class="prod-card__name">${escapeHtml(p.nombre)}</h4>
+          ${p.descripcion ? `<p class="prod-card__desc">${escapeHtml(p.descripcion)}</p>` : ''}
+          <div class="prod-card__foot">
+            <span class="prod-card__price">${fmtPesos(p.precioBase)}</span>
+            ${mods ? `<span class="prod-card__mods">${mods} mod.</span>` : ''}
+          </div>
+        </div>
+        ${puedeEditar ? `
+          <div class="prod-card__actions">
+            <button class="prod-action" data-prod-toggle="${p.id}" title="${agotado ? 'Marcar disponible' : 'Marcar agotado'}">
+              ${agotado
+                ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
+                : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>`}
+            </button>
+            <button class="prod-action" data-prod-edit="${p.id}" title="Editar">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
+          </div>
+        ` : ''}
+      </article>
+    `;
+  },
+
+  async toggleDisponible(id) {
+    const p = this.data.productos.find(x => x.id === id);
+    if (!p) return;
+    startLoading();
+    try {
+      await apiPost('toggleDisponible', withUser({ id }));
+      p.disponible = !p.disponible;
+      stopLoading();
+      this.render();
+      Toast && Toast.fire({ icon: 'success', title: p.disponible ? 'Disponible' : 'Marcado agotado' });
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  abrirModalProducto(producto) {
+    const isNew = !producto;
+    const p = producto || {
+      id: '', categoriaId: this.data.categorias[0]?.id || '', nombre: '', descripcion: '',
+      precioBase: 0, imagenUrl: '', tipo: 'PREPARACION', tiempoPrep: 15,
+      manejaStock: false, disponible: true, orden: 0
+    };
+    const mods = isNew ? [] : (this.data.modificadores[p.id] || []);
+
+    const cats = this.data.categorias;
+    const optsCats = cats.map(c =>
+      `<option value="${c.id}" ${c.id === p.categoriaId ? 'selected' : ''}>${escapeHtml(c.nombre)}</option>`
+    ).join('');
+
+    const html = `
+      <div class="prod-modal">
+        <div class="prod-modal__img" id="prod-img-wrap">
+          <img id="prod-img-preview" src="${p.imagenUrl || PLACEHOLDER_PRODUCTO}"
+               onerror="this.src='${PLACEHOLDER_PRODUCTO}'" />
+          <label class="prod-modal__img-btn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+              <circle cx="12" cy="13" r="4"/>
+            </svg>
+            <span>Cambiar foto</span>
+            <input type="file" id="prod-img-input" accept="image/*" hidden />
+          </label>
+        </div>
+
+        <label>Nombre</label>
+        <input type="text" id="m-nombre" value="${escapeHtml(p.nombre)}" placeholder="Ej: BANDEJA DE TILAPIA" />
+
+        <label>Descripción</label>
+        <textarea id="m-descripcion" placeholder="Descripción breve">${escapeHtml(p.descripcion)}</textarea>
+
+        <div class="grid-2">
+          <div>
+            <label>Categoría</label>
+            <select id="m-categoria">${optsCats}</select>
+          </div>
+          <div>
+            <label>Precio base</label>
+            <input type="number" id="m-precio" value="${p.precioBase}" min="0" step="100" />
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div>
+            <label>Tipo</label>
+            <select id="m-tipo">
+              <option value="PREPARACION" ${p.tipo === 'PREPARACION' ? 'selected' : ''}>Preparación (cocina)</option>
+              <option value="RAPIDO"      ${p.tipo === 'RAPIDO' ? 'selected' : ''}>Rápido (sin cocina)</option>
+            </select>
+          </div>
+          <div>
+            <label>Tiempo prep. (min)</label>
+            <input type="number" id="m-tiempo" value="${p.tiempoPrep}" min="0" max="120" />
+          </div>
+        </div>
+
+        <label class="check-row">
+          <input type="checkbox" id="m-stock" ${p.manejaStock ? 'checked' : ''} />
+          <span>Maneja stock (bebidas / cervezas)</span>
+        </label>
+
+        <label class="check-row">
+          <input type="checkbox" id="m-disp" ${p.disponible ? 'checked' : ''} />
+          <span>Disponible para vender</span>
+        </label>
+
+        ${isNew ? `
+          <p class="muted" style="margin-top:14px; font-size:0.78rem;">
+            Los modificadores se podrán agregar después de guardar el producto.
+          </p>
+        ` : `
+          <div class="mods-section">
+            <div class="mods-section__head">
+              <h4>Modificadores</h4>
+              <button type="button" class="btn btn-ghost btn-sm" id="mod-nuevo-grupo">+ Grupo</button>
+            </div>
+            <div id="mods-list">${this.renderModsListHTML(mods)}</div>
+          </div>
+        `}
+      </div>
+    `;
+
+    const self = this;
+    let imgBase64 = null;
+    let imgFilename = null;
+
+    Swal.fire({
+      title: isNew ? 'Nuevo producto' : 'Editar producto',
+      html,
+      width: 640,
+      showCancelButton: true,
+      confirmButtonText: isNew ? 'Crear' : 'Guardar',
+      cancelButtonText: 'Cancelar',
+      showDenyButton: !isNew,
+      denyButtonText: 'Eliminar',
+      reverseButtons: true,
+      focusConfirm: false,
+      didOpen: () => {
+        // Imagen: preview en local
+        const inp = document.getElementById('prod-img-input');
+        const preview = document.getElementById('prod-img-preview');
+        if (inp) {
+          inp.addEventListener('change', async () => {
+            const file = inp.files && inp.files[0];
+            if (!file) return;
+            if (file.size > 4 * 1024 * 1024) {
+              alertWarn('Imagen muy grande', 'La imagen no puede pesar más de 4 MB.');
+              inp.value = '';
+              return;
+            }
+            try {
+              imgBase64 = await fileToBase64(file);
+              imgFilename = file.name;
+              preview.src = URL.createObjectURL(file);
+            } catch (e) {
+              alertErr('Error', e.message);
+            }
+          });
+        }
+        // Modificadores: bind acciones
+        if (!isNew) self.bindModsActions(p.id);
+      },
+      preConfirm: () => {
+        const nombre = $('#m-nombre').value.trim();
+        if (!nombre) { Swal.showValidationMessage('Nombre requerido'); return false; }
+        const precio = Number($('#m-precio').value);
+        if (!(precio >= 0)) { Swal.showValidationMessage('Precio inválido'); return false; }
+        return {
+          nombre,
+          descripcion: $('#m-descripcion').value.trim(),
+          categoriaId: $('#m-categoria').value,
+          precioBase: precio,
+          tipo: $('#m-tipo').value,
+          tiempoPrep: Number($('#m-tiempo').value) || 0,
+          manejaStock: $('#m-stock').checked,
+          disponible: $('#m-disp').checked,
+          imgBase64, imgFilename
+        };
+      }
+    }).then(async (res) => {
+      if (res.isDenied) {
+        const ok = await confirmar('Eliminar producto',
+          `¿Eliminar <b>${escapeHtml(p.nombre)}</b>? Esta acción es reversible (soft delete).`,
+          'Sí, eliminar');
+        if (ok) await self.eliminarProducto(p.id);
+      } else if (res.isConfirmed) {
+        await self.guardarProducto(isNew ? null : p.id, res.value);
+      }
+    });
+  },
+
+  renderModsListHTML(mods) {
+    if (!mods || !mods.length) {
+      return `<p class="muted" style="font-size:0.82rem; padding:6px 2px;">
+                Sin modificadores. Toca <b>+ Grupo</b> para crear uno.
+              </p>`;
+    }
+    return mods.map(g => `
+      <div class="mod-group" data-grupo="${escapeHtml(g.grupo)}">
+        <div class="mod-group__head">
+          <div>
+            <strong>${escapeHtml(g.nombreGrupo || g.grupo)}</strong>
+            <span class="mod-tag">${g.tipoSeleccion || 'UNICA'}</span>
+            ${g.obligatorio ? `<span class="mod-tag mod-tag--obligatorio">obligatorio</span>` : ''}
+          </div>
+          <button type="button" class="mod-btn-add" data-mod-add-opt="${escapeHtml(g.grupo)}" title="Agregar opción">+</button>
+        </div>
+        <ul class="mod-opts">
+          ${g.opciones.map(o => `
+            <li class="mod-opt">
+              <span class="mod-opt__name">${escapeHtml(o.opcion)}</span>
+              <span class="mod-opt__delta">${o.precioDelta > 0 ? '+' : ''}${fmtPesos(o.precioDelta)}</span>
+              <button type="button" class="mod-opt__edit"   data-mod-edit="${o.id}"   title="Editar">✎</button>
+              <button type="button" class="mod-opt__delete" data-mod-delete="${o.id}" title="Eliminar">×</button>
+            </li>
+          `).join('')}
+        </ul>
+      </div>
+    `).join('');
+  },
+
+  bindModsActions(productoId) {
+    const self = this;
+    $('#mod-nuevo-grupo')?.addEventListener('click', () => self.dialogoNuevoGrupo(productoId));
+    $$('[data-mod-add-opt]').forEach(b => {
+      b.addEventListener('click', () => {
+        const grupo = b.dataset.modAddOpt;
+        const mods = self.data.modificadores[productoId] || [];
+        const g = mods.find(x => String(x.grupo) === String(grupo));
+        if (g) self.dialogoNuevaOpcion(productoId, g);
+      });
+    });
+    $$('[data-mod-edit]').forEach(b => {
+      b.addEventListener('click', () => {
+        const id = b.dataset.modEdit;
+        const mods = self.data.modificadores[productoId] || [];
+        for (const g of mods) {
+          const o = g.opciones.find(x => x.id === id);
+          if (o) { self.dialogoEditarOpcion(productoId, g, o); break; }
+        }
+      });
+    });
+    $$('[data-mod-delete]').forEach(b => {
+      b.addEventListener('click', async () => {
+        const id = b.dataset.modDelete;
+        const ok = await confirmar('Eliminar opción', '¿Eliminar esta opción del modificador?', 'Sí, eliminar');
+        if (!ok) return;
+        await self.eliminarModificador(productoId, id);
+      });
+    });
+  },
+
+  async dialogoNuevoGrupo(productoId) {
+    const r = await Swal.fire({
+      title: 'Nuevo grupo de modificadores',
+      html: `
+        <label>Código (mayúsculas, sin espacios)</label>
+        <input id="mg-grupo" placeholder="Ej: TAMAÑO" />
+        <label>Nombre visible</label>
+        <input id="mg-nombre" placeholder="Ej: Tamaño" />
+        <div class="grid-2">
+          <div>
+            <label>Selección</label>
+            <select id="mg-tipo">
+              <option value="UNICA">Única</option>
+              <option value="MULTIPLE">Múltiple</option>
+            </select>
+          </div>
+          <div>
+            <label class="check-row" style="margin-top:22px;">
+              <input type="checkbox" id="mg-obligatorio" checked />
+              <span>Obligatorio</span>
+            </label>
+          </div>
+        </div>
+        <hr style="border:0; border-top:1px dashed var(--border); margin:14px 0;" />
+        <label>Primera opción</label>
+        <input id="mg-opcion" placeholder="Ej: Pequeño" />
+        <label>Precio delta (puede ser 0 o negativo)</label>
+        <input id="mg-delta" type="number" value="0" step="100" />
+      `,
+      showCancelButton: true, confirmButtonText: 'Crear grupo', cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      preConfirm: () => {
+        const grupo = $('#mg-grupo').value.trim().toUpperCase().replace(/\s+/g, '_');
+        const nombreGrupo = $('#mg-nombre').value.trim() || grupo;
+        const tipoSeleccion = $('#mg-tipo').value;
+        const obligatorio = $('#mg-obligatorio').checked;
+        const opcion = $('#mg-opcion').value.trim();
+        const precioDelta = Number($('#mg-delta').value) || 0;
+        if (!grupo)  { Swal.showValidationMessage('Código del grupo requerido'); return false; }
+        if (!opcion) { Swal.showValidationMessage('Primera opción requerida'); return false; }
+        return { grupo, nombreGrupo, tipoSeleccion, obligatorio, opcion, precioDelta };
+      }
+    });
+    if (!r.isConfirmed) return;
+    startLoading();
+    try {
+      await apiPost('upsertModificador', withUser({
+        productoId, ...r.value, orden: 1
+      }));
+      await this.cargar();
+      // Re-abrir modal de producto con datos frescos
+      const fresh = this.data.productos.find(x => x.id === productoId);
+      if (fresh) this.abrirModalProducto(fresh);
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  async dialogoNuevaOpcion(productoId, grupo) {
+    const r = await Swal.fire({
+      title: `Nueva opción en "${escapeHtml(grupo.nombreGrupo || grupo.grupo)}"`,
+      html: `
+        <label>Opción</label>
+        <input id="mo-opcion" placeholder="Ej: Grande" />
+        <label>Precio delta</label>
+        <input id="mo-delta" type="number" value="0" step="100" />
+      `,
+      showCancelButton: true, confirmButtonText: 'Agregar', cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      preConfirm: () => {
+        const opcion = $('#mo-opcion').value.trim();
+        const precioDelta = Number($('#mo-delta').value) || 0;
+        if (!opcion) { Swal.showValidationMessage('Opción requerida'); return false; }
+        return { opcion, precioDelta };
+      }
+    });
+    if (!r.isConfirmed) return;
+    startLoading();
+    try {
+      await apiPost('upsertModificador', withUser({
+        productoId,
+        grupo: grupo.grupo,
+        nombreGrupo: grupo.nombreGrupo,
+        tipoSeleccion: grupo.tipoSeleccion,
+        obligatorio: grupo.obligatorio,
+        opcion: r.value.opcion,
+        precioDelta: r.value.precioDelta,
+        orden: (grupo.opciones.length + 1)
+      }));
+      await this.cargar();
+      const fresh = this.data.productos.find(x => x.id === productoId);
+      if (fresh) this.abrirModalProducto(fresh);
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  async dialogoEditarOpcion(productoId, grupo, opcion) {
+    const r = await Swal.fire({
+      title: 'Editar opción',
+      html: `
+        <label>Opción</label>
+        <input id="moe-opcion" value="${escapeHtml(opcion.opcion)}" />
+        <label>Precio delta</label>
+        <input id="moe-delta" type="number" value="${opcion.precioDelta}" step="100" />
+      `,
+      showCancelButton: true, confirmButtonText: 'Guardar', cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      preConfirm: () => {
+        const opc = $('#moe-opcion').value.trim();
+        const delta = Number($('#moe-delta').value) || 0;
+        if (!opc) { Swal.showValidationMessage('Opción requerida'); return false; }
+        return { opcion: opc, precioDelta: delta };
+      }
+    });
+    if (!r.isConfirmed) return;
+    startLoading();
+    try {
+      await apiPost('upsertModificador', withUser({
+        id: opcion.id,
+        productoId,
+        grupo: grupo.grupo,
+        nombreGrupo: grupo.nombreGrupo,
+        tipoSeleccion: grupo.tipoSeleccion,
+        obligatorio: grupo.obligatorio,
+        opcion: r.value.opcion,
+        precioDelta: r.value.precioDelta,
+        orden: opcion.orden
+      }));
+      await this.cargar();
+      const fresh = this.data.productos.find(x => x.id === productoId);
+      if (fresh) this.abrirModalProducto(fresh);
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  async eliminarModificador(productoId, id) {
+    startLoading();
+    try {
+      await apiPost('eliminarModificador', withUser({ id }));
+      await this.cargar();
+      const fresh = this.data.productos.find(x => x.id === productoId);
+      if (fresh) this.abrirModalProducto(fresh);
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  async guardarProducto(id, datos) {
+    startLoading();
+    try {
+      let imagenUrl = null;
+      // 1. Si hay imagen nueva, subirla primero
+      if (datos.imgBase64) {
+        const up = await apiPost('subirImagenProducto', withUser({
+          productoId: id || null,
+          filename: datos.imgFilename || 'producto.jpg',
+          base64: datos.imgBase64
+        }));
+        imagenUrl = up.url;
+      }
+      // 2. Upsert producto
+      const body = {
+        id: id || null,
+        nombre: datos.nombre,
+        descripcion: datos.descripcion,
+        categoriaId: datos.categoriaId,
+        precioBase: datos.precioBase,
+        tipo: datos.tipo,
+        tiempoPrep: datos.tiempoPrep,
+        manejaStock: datos.manejaStock,
+        disponible: datos.disponible
+      };
+      if (imagenUrl) body.imagenUrl = imagenUrl;
+      // Conservar URL existente si el usuario no cambió la foto
+      if (!imagenUrl && id) {
+        const orig = this.data.productos.find(x => x.id === id);
+        if (orig) body.imagenUrl = orig.imagenUrl;
+      }
+      await apiPost('upsertProducto', withUser(body));
+      stopLoading();
+      Toast && Toast.fire({ icon: 'success', title: id ? 'Producto actualizado' : 'Producto creado' });
+      await this.cargar();
+    } catch (e) {
+      stopLoading();
+      alertErr('Error al guardar', e.message);
+    }
+  },
+
+  async eliminarProducto(id) {
+    startLoading();
+    try {
+      await apiPost('eliminarProducto', withUser({ id }));
+      stopLoading();
+      Toast && Toast.fire({ icon: 'success', title: 'Producto eliminado' });
+      await this.cargar();
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  setupListeners() {
+    // FAB nuevo producto
+    const fab = $('#catalogo-fab');
+    if (fab && !fab._bound) {
+      fab.addEventListener('click', () => this.abrirModalProducto(null));
+      fab._bound = true;
+    }
+    // Búsqueda
+    const btn = $('#catalogo-search-btn');
+    const bar = $('#catalogo-search-bar');
+    const inp = $('#catalogo-search-input');
+    if (btn && !btn._bound) {
+      btn.addEventListener('click', () => {
+        bar.classList.toggle('hidden');
+        if (!bar.classList.contains('hidden')) inp.focus();
+        else { inp.value = ''; this.filtroTexto = ''; this.render(); }
+      });
+      btn._bound = true;
+    }
+    if (inp && !inp._bound) {
+      let t = null;
+      inp.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(() => {
+          this.filtroTexto = inp.value;
+          this.render();
+        }, 180);
+      });
+      inp._bound = true;
+    }
+  }
+};
+
+/* ============================================================
+   ============================================================
+   FASE 2 — VISTA MESAS
+   ============================================================
+   ============================================================ */
+const Mesas = {
+  data: [],
+
+  async abrir() {
+    showView('mesas');
+    await this.cargar();
+  },
+
+  async cargar() {
+    startLoading();
+    try {
+      this.data = await apiGet('listMesas');
+      this.render();
+    } catch (e) {
+      alertErr('Error al cargar mesas', e.message);
+    } finally {
+      stopLoading();
+    }
+  },
+
+  render() {
+    const puedeEditar = rolEs('SUPERUSUARIO', 'ADMINISTRADOR');
+    const fab = $('#mesas-fab');
+    if (fab) fab.classList.toggle('hidden', !puedeEditar);
+
+    const sub = $('#mesas-subtitle');
+    if (sub) sub.textContent = `${this.data.length} mesa${this.data.length === 1 ? '' : 's'} configurada${this.data.length === 1 ? '' : 's'}`;
+
+    const cont = $('#mesas-content');
+    if (!this.data.length) {
+      cont.innerHTML = `
+        <div class="card text-center" style="margin-top:16px;">
+          <h3>No hay mesas configuradas</h3>
+          <p class="muted">Toca <b>+</b> para crear la primera mesa.</p>
+        </div>`;
+      return;
+    }
+
+    cont.innerHTML = this.data.map(m => `
+      <div class="mesa-cfg-card mesa-libre" data-mesa-id="${m.id}">
+        <div class="mesa-cfg-card__num">${m.numero}</div>
+        <div class="mesa-cfg-card__meta">
+          <span class="mesa-cfg-card__cap">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px; margin-right:3px;">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>${m.capacidad}
+          </span>
+          <span class="mesa-cfg-card__zona">${escapeHtml(m.zona || 'SALON')}</span>
+        </div>
+        ${puedeEditar ? `
+          <button class="mesa-cfg-card__edit" data-mesa-edit="${m.id}" title="Editar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </button>
+        ` : ''}
+      </div>
+    `).join('');
+
+    if (puedeEditar) {
+      $$('[data-mesa-edit]', cont).forEach(b => {
+        b.addEventListener('click', () => {
+          const id = b.dataset.mesaEdit;
+          const m = this.data.find(x => x.id === id);
+          if (m) this.abrirModalMesa(m);
+        });
+      });
+    }
+  },
+
+  abrirModalMesa(mesa) {
+    const isNew = !mesa;
+    const m = mesa || { id: '', numero: this.proximoNumero(), capacidad: 4, zona: 'SALON' };
+    const self = this;
+    Swal.fire({
+      title: isNew ? 'Nueva mesa' : `Mesa ${m.numero}`,
+      html: `
+        <label>Número de mesa</label>
+        <input id="ms-numero" type="number" min="1" value="${m.numero}" />
+        <div class="grid-2">
+          <div>
+            <label>Capacidad</label>
+            <input id="ms-cap" type="number" min="1" max="20" value="${m.capacidad}" />
+          </div>
+          <div>
+            <label>Zona</label>
+            <select id="ms-zona">
+              ${['SALON','TERRAZA','BAR','VIP','EXTERIOR'].map(z =>
+                `<option value="${z}" ${z === (m.zona || 'SALON') ? 'selected' : ''}>${z}</option>`
+              ).join('')}
+            </select>
+          </div>
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: isNew ? 'Crear mesa' : 'Guardar',
+      cancelButtonText: 'Cancelar',
+      showDenyButton: !isNew,
+      denyButtonText: 'Eliminar',
+      reverseButtons: true,
+      preConfirm: () => {
+        const numero = Number($('#ms-numero').value);
+        const capacidad = Number($('#ms-cap').value);
+        const zona = $('#ms-zona').value;
+        if (!(numero > 0)) { Swal.showValidationMessage('Número inválido'); return false; }
+        if (!(capacidad > 0)) { Swal.showValidationMessage('Capacidad inválida'); return false; }
+        // Validar duplicado
+        const dup = self.data.find(x => Number(x.numero) === numero && x.id !== m.id);
+        if (dup) { Swal.showValidationMessage(`Ya existe una mesa #${numero}`); return false; }
+        return { numero, capacidad, zona };
+      }
+    }).then(async (res) => {
+      if (res.isDenied) {
+        const ok = await confirmar('Eliminar mesa',
+          `¿Eliminar la mesa <b>#${m.numero}</b>?`, 'Sí, eliminar');
+        if (ok) await self.eliminar(m.id);
+      } else if (res.isConfirmed) {
+        await self.guardar(isNew ? null : m.id, res.value);
+      }
+    });
+  },
+
+  proximoNumero() {
+    if (!this.data.length) return 1;
+    return Math.max(...this.data.map(m => Number(m.numero) || 0)) + 1;
+  },
+
+  async guardar(id, datos) {
+    startLoading();
+    try {
+      await apiPost('upsertMesa', withUser({
+        id: id || null,
+        numero: datos.numero,
+        capacidad: datos.capacidad,
+        zona: datos.zona
+      }));
+      stopLoading();
+      Toast && Toast.fire({ icon: 'success', title: id ? 'Mesa actualizada' : 'Mesa creada' });
+      await this.cargar();
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  async eliminar(id) {
+    startLoading();
+    try {
+      await apiPost('eliminarMesa', withUser({ id }));
+      stopLoading();
+      Toast && Toast.fire({ icon: 'success', title: 'Mesa eliminada' });
+      await this.cargar();
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  setupListeners() {
+    const fab = $('#mesas-fab');
+    if (fab && !fab._bound) {
+      fab.addEventListener('click', () => this.abrirModalMesa(null));
+      fab._bound = true;
+    }
+  }
+};
+
+/* ============================================================
+   ============================================================
+   FASE 2 — VISTA INVENTARIO
+   ============================================================
+   ============================================================ */
+const Inventario = {
+  data: [],
+
+  async abrir() {
+    showView('inventario');
+    await this.cargar();
+  },
+
+  async cargar() {
+    startLoading();
+    try {
+      this.data = await apiGet('getInventario');
+      this.render();
+    } catch (e) {
+      alertErr('Error al cargar inventario', e.message);
+    } finally {
+      stopLoading();
+    }
+  },
+
+  render() {
+    const puedeAjustar = rolEs('SUPERUSUARIO', 'ADMINISTRADOR');
+    const cont = $('#inventario-content');
+    const sum = $('#inventario-summary');
+
+    if (!this.data.length) {
+      sum.innerHTML = '';
+      cont.innerHTML = `
+        <div class="card text-center" style="margin-top:16px;">
+          <h3>Sin productos con stock</h3>
+          <p class="muted">Marca <b>"Maneja stock"</b> en los productos del catálogo para que aparezcan aquí.</p>
+        </div>`;
+      return;
+    }
+
+    // Orden: alerta primero, luego nombre
+    const items = [...this.data].sort((a, b) => {
+      if (a.enAlerta !== b.enAlerta) return a.enAlerta ? -1 : 1;
+      return String(a.nombre).localeCompare(String(b.nombre), 'es');
+    });
+
+    const alertas = items.filter(i => i.enAlerta).length;
+    sum.innerHTML = `
+      <div class="inv-summary__row">
+        <div class="inv-summary__chip">
+          <span class="inv-summary__num">${items.length}</span>
+          <span class="inv-summary__lbl">Productos</span>
+        </div>
+        <div class="inv-summary__chip ${alertas ? 'inv-summary__chip--alert' : ''}">
+          <span class="inv-summary__num">${alertas}</span>
+          <span class="inv-summary__lbl">En alerta</span>
+        </div>
+      </div>
+    `;
+
+    cont.innerHTML = items.map(i => {
+      const alerta = i.enAlerta;
+      return `
+        <div class="inv-row ${alerta ? 'inv-row--alerta' : ''}">
+          <div class="inv-row__main">
+            <h4 class="inv-row__name">${escapeHtml(i.nombre)}</h4>
+            <div class="inv-row__meta">
+              <span>Mín: <b>${i.stockMinimo}</b></span>
+              <span>·</span>
+              <span>Últ. entrada: ${fmtFechaCorta(i.fechaUltimaEntrada)}</span>
+            </div>
+          </div>
+          <div class="inv-row__stock">
+            <div class="inv-row__num ${alerta ? 'is-alerta' : ''}">${i.stockActual}</div>
+            <div class="inv-row__unit">${escapeHtml(i.unidad || 'UND')}</div>
+          </div>
+          ${puedeAjustar ? `
+            <div class="inv-row__actions">
+              <button class="btn-ico btn-ico--ok"   data-inv-mov="ENTRADA" data-inv-id="${i.id}" title="Entrada">＋</button>
+              <button class="btn-ico btn-ico--info" data-inv-mov="AJUSTE"  data-inv-id="${i.id}" title="Ajuste">≡</button>
+              <button class="btn-ico btn-ico--err"  data-inv-mov="MERMA"   data-inv-id="${i.id}" title="Merma">−</button>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+
+    if (puedeAjustar) {
+      $$('[data-inv-mov]', cont).forEach(b => {
+        b.addEventListener('click', () => {
+          const id = b.dataset.invId;
+          const tipo = b.dataset.invMov;
+          const item = items.find(x => x.id === id);
+          if (item) this.abrirModalAjuste(item, tipo);
+        });
+      });
+    }
+  },
+
+  abrirModalAjuste(item, tipo) {
+    const titulos = { ENTRADA: 'Entrada de stock', AJUSTE: 'Ajuste de stock', MERMA: 'Merma' };
+    const ayudas = {
+      ENTRADA: `Suma al stock actual de <b>${item.stockActual}</b>.`,
+      AJUSTE:  `Reemplaza el stock actual (<b>${item.stockActual}</b>) por el valor que ingreses.`,
+      MERMA:   `Resta del stock actual (<b>${item.stockActual}</b>). Pérdida, vencimiento o avería.`
+    };
+    const ph = tipo === 'AJUSTE' ? 'Stock final exacto' : 'Cantidad';
+    const self = this;
+
+    Swal.fire({
+      title: titulos[tipo] + ' — ' + item.nombre,
+      html: `
+        <p class="muted" style="font-size:0.85rem; margin-bottom:14px;">${ayudas[tipo]}</p>
+        <label>${ph}</label>
+        <input id="aj-cant" type="number" min="0" step="1" placeholder="0" autofocus />
+        <label>Observaciones (opcional)</label>
+        <textarea id="aj-obs" placeholder="Ej: factura proveedor, vencimiento..."></textarea>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'Aplicar ' + (tipo === 'ENTRADA' ? 'entrada' : tipo === 'AJUSTE' ? 'ajuste' : 'merma'),
+      cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      preConfirm: () => {
+        const cant = Number($('#aj-cant').value);
+        if (isNaN(cant) || cant < 0) { Swal.showValidationMessage('Cantidad inválida'); return false; }
+        if (tipo !== 'AJUSTE' && cant === 0) { Swal.showValidationMessage('Cantidad debe ser mayor a 0'); return false; }
+        return { cant, obs: $('#aj-obs').value.trim() };
+      }
+    }).then(async (res) => {
+      if (!res.isConfirmed) return;
+      await self.aplicar(item.id, tipo, res.value.cant, res.value.obs);
+    });
+  },
+
+  async aplicar(inventarioId, tipo, cantidad, observaciones) {
+    startLoading();
+    try {
+      const r = await apiPost('ajustarStock', withUser({
+        inventarioId,
+        tipoMovimiento: tipo,
+        cantidad,
+        observaciones
+      }));
+      stopLoading();
+      Toast && Toast.fire({ icon: 'success', title: `Stock actualizado: ${r.stockDespues}` });
+      await this.cargar();
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  setupListeners() { /* nada por ahora */ }
+};
+
+/* ============================================================
    INICIALIZACIÓN
    ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
@@ -683,4 +1689,9 @@ window.addEventListener('DOMContentLoaded', () => {
   setupPWA();
   checkVersion();
   setInterval(checkVersion, 5 * 60 * 1000); // cada 5 min
+
+  // Listeners de las vistas Fase 2
+  Catalogo.setupListeners();
+  Mesas.setupListeners();
+  Inventario.setupListeners();
 });
