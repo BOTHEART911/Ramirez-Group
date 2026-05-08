@@ -1,0 +1,31 @@
+{
+  "id": "/ramirez-group/",
+  "name": "Ramírez Group",
+  "short_name": "RamírezGroup",
+  "description": "Sistema de gestión Restaurante y Pescadería Ramírez",
+  "start_url": "/ramirez-group/",
+  "scope": "/ramirez-group/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fefaf2",
+  "theme_color": "#06402B",
+  "capture_links": "existing-client-navigate",
+  "launch_handler": { "client_mode": "navigate-existing" },
+
+  "prefer_related_applications": false,
+
+  "icons": [
+    {
+      "src": "https://res.cloudinary.com/dqqeavica/image/upload/v1778181509/Ramirez_group_lrsfbb.gif",
+      "sizes": "192x192",
+      "type": "image/gif",
+      "purpose": "any"
+    },
+    {
+      "src": "https://res.cloudinary.com/dqqeavica/image/upload/v1778181509/Ramirez_group_lrsfbb.gif",
+      "sizes": "512x512",
+      "type": "image/gif",
+      "purpose": "any maskable"
+    }
+  ]
+}
