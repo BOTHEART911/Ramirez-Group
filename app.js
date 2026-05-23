@@ -27,7 +27,7 @@ const firebaseConfig = {
 /* ============================================================
    CONSTANTES GENERALES
    ============================================================ */
-const APP_VERSION = '2026.05.23.3';   // se sobreescribe al leer version.json
+const APP_VERSION = '2026.05.23.4';  // se sobreescribe al leer version.json
 const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
@@ -482,7 +482,7 @@ function irAMenuRestaurante() {
       key: 'comanda', titulo: 'Comanda', desc: 'Vista de cocina',
       icono: ICONOS.chef,
       roles: ['SUPERUSUARIO','ADMINISTRADOR','COCINA'],
-      view: 'pendiente', placeholder: 'Comanda de cocina'
+      view: 'comanda'
     },
     {
       key: 'pagos', titulo: 'Caja', desc: 'Cobrar y comprobantes',
@@ -564,8 +564,10 @@ function irAMenuRestaurante() {
         Mesas.abrir();
       } else if (t.view === 'inventario') {
         Inventario.abrir();
-      } else if (t.view === 'tomar-pedido') {
+     } else if (t.view === 'tomar-pedido') {
         Pedidos.abrir();
+      } else if (t.view === 'comanda') {
+        Comanda.abrir();
       } else {
         showView(t.view);
       }
@@ -588,10 +590,12 @@ function irAMenuRestaurante() {
    NAVEGACIÓN POR data-go
    ============================================================ */
 function setupNavegacion() {
-  document.addEventListener('click', (e) => {
+document.addEventListener('click', (e) => {
     const t = e.target.closest('[data-go]');
     if (!t) return;
     const dest = t.dataset.go;
+    // Si veníamos de Comanda, desenganchar listener + cronómetro
+    if (typeof Comanda !== 'undefined') Comanda.desenganchar();
     if (dest === 'inicio') irAInicio();
     else if (dest === 'restaurante') irAMenuRestaurante();
     else showView(dest);
@@ -2421,6 +2425,232 @@ const Pedidos = {
 };
 
 /* ============================================================
+   ============================================================
+   FASE 3B — COMANDA COCINA
+   Tablero kanban en vivo: PENDIENTES → EN COCINA → LISTOS
+   ============================================================
+   ============================================================ */
+const Comanda = {
+  items: {},          // { itemId: {pedidoId, mesaNumero, nombre, estadoPrep, ...} }
+  optimistas: {},     // { itemId: 'PREPARANDO' | 'LISTO' } — estados forzados localmente
+  _ref: null,
+  _tickInterval: null,
+
+  async abrir() {
+    showView('comanda');
+    await this.cargarInicial();
+    await this.engancharRTDB();
+    this.startTicker();
+  },
+
+  async cargarInicial() {
+    startLoading();
+    try {
+      await apiPost('sincronizarVistaCocina', withUser({}));
+    } catch (e) {
+      alertErr('Error al cargar comanda', e.message);
+    } finally {
+      stopLoading();
+    }
+  },
+
+  async engancharRTDB() {
+    if (this._ref) return;
+    const fb = await getFirebase();
+    if (!fb) return;
+    this._ref = fb.database()
+      .ref('/negocios/' + NEGOCIO_RESTAURANTE_ID + '/cocina/pendientes');
+    this._ref.on('value', (snap) => {
+      this.items = snap.val() || {};
+      // Limpiar optimistas que ya se confirmaron en el snapshot
+      Object.keys(this.optimistas).forEach(itemId => {
+        const real = this.items[itemId];
+        if (!real || String(real.estadoPrep).toUpperCase() === this.optimistas[itemId]) {
+          delete this.optimistas[itemId];
+        }
+      });
+      this.render();
+    }, (err) => {
+      console.error('RTDB listener cocina:', err);
+    });
+  },
+
+  startTicker() {
+    if (this._tickInterval) return;
+    // Re-render cada segundo SOLO los cronómetros (sin reconstruir DOM completo)
+    this._tickInterval = setInterval(() => this.tickCronos(), 1000);
+  },
+
+  stopTicker() {
+    if (this._tickInterval) {
+      clearInterval(this._tickInterval);
+      this._tickInterval = null;
+    }
+  },
+
+  estadoEfectivo(itemId, item) {
+    return this.optimistas[itemId] || String(item.estadoPrep || 'PENDIENTE').toUpperCase();
+  },
+
+  render() {
+    const cont = $('#comanda-content');
+    if (!cont) return;
+
+    // Agrupar por estado efectivo
+    const cols = { PENDIENTE: [], PREPARANDO: [], LISTO: [] };
+    Object.entries(this.items).forEach(([id, it]) => {
+      const est = this.estadoEfectivo(id, it);
+      if (cols[est]) cols[est].push({ id, ...it });
+    });
+
+    // Ordenar por fechaPedido (más antiguo arriba)
+    Object.keys(cols).forEach(k => {
+      cols[k].sort((a, b) => String(a.fechaPedido).localeCompare(String(b.fechaPedido)));
+    });
+
+    const total = cols.PENDIENTE.length + cols.PREPARANDO.length + cols.LISTO.length;
+    $('#comanda-subtitle').textContent = total
+      ? `${total} ítem${total === 1 ? '' : 's'} en cocina`
+      : 'Sin ítems en cocina';
+
+    if (!total) {
+      cont.innerHTML = `
+        <div class="card text-center" style="margin-top:32px;">
+          <div style="font-size: 3rem; margin-bottom: 8px;">👨‍🍳</div>
+          <h3>Todo al día</h3>
+          <p class="muted">No hay platos pendientes en cocina.</p>
+        </div>`;
+      return;
+    }
+
+    cont.innerHTML = `
+      <div class="kanban">
+        ${this.renderColumna('PENDIENTE',  'Pendientes', cols.PENDIENTE)}
+        ${this.renderColumna('PREPARANDO', 'En cocina',  cols.PREPARANDO)}
+        ${this.renderColumna('LISTO',      'Listos',     cols.LISTO)}
+      </div>
+    `;
+
+    // Bind acciones
+    $$('[data-cmd-start]', cont).forEach(b => {
+      b.addEventListener('click', () => this.cambiarEstado(b.dataset.cmdStart, 'PREPARANDO'));
+    });
+    $$('[data-cmd-ready]', cont).forEach(b => {
+      b.addEventListener('click', () => this.cambiarEstado(b.dataset.cmdReady, 'LISTO'));
+    });
+    $$('[data-cmd-back]', cont).forEach(b => {
+      b.addEventListener('click', () => this.cambiarEstado(b.dataset.cmdBack, 'PENDIENTE'));
+    });
+  },
+
+  renderColumna(estado, titulo, items) {
+    const cards = items.length
+      ? items.map(it => this.renderTarjeta(it, estado)).join('')
+      : `<div class="kanban-col__empty">—</div>`;
+    return `
+      <section class="kanban-col kanban-col--${estado.toLowerCase()}">
+        <header class="kanban-col__head">
+          <h3>${titulo}</h3>
+          <span class="kanban-col__count">${items.length}</span>
+        </header>
+        <div class="kanban-col__body">${cards}</div>
+      </section>
+    `;
+  },
+
+  renderTarjeta(it, estado) {
+    const mods = (it.modificadores || []).map(m =>
+      `<li>${escapeHtml(m.nombreGrupo || m.grupo)}: <b>${escapeHtml(m.opcion)}</b></li>`
+    ).join('');
+    const desc = it.descripcion
+      ? `<div class="cmd-card__desc">📝 ${escapeHtml(it.descripcion)}</div>`
+      : '';
+    const tmp = this.optimistas[it.id] ? 'is-tmp' : '';
+
+    let acciones = '';
+    if (estado === 'PENDIENTE') {
+      acciones = `<button class="cmd-btn cmd-btn--start" data-cmd-start="${it.id}">Empezar</button>`;
+    } else if (estado === 'PREPARANDO') {
+      acciones = `
+        <button class="cmd-btn cmd-btn--back"  data-cmd-back="${it.id}" title="Devolver a pendientes">↶</button>
+        <button class="cmd-btn cmd-btn--ready" data-cmd-ready="${it.id}">Marcar listo</button>
+      `;
+    } else {
+      acciones = `<button class="cmd-btn cmd-btn--back" data-cmd-back="${it.id}" title="Volver a cocina">↶ Volver</button>`;
+    }
+
+    return `
+      <article class="cmd-card cmd-card--${estado.toLowerCase()} ${tmp}" data-cmd-id="${it.id}">
+        <div class="cmd-card__head">
+          <div class="cmd-card__mesa">Mesa <b>${it.mesaNumero || '?'}</b></div>
+          <div class="cmd-card__crono" data-crono-from="${it.fechaPedido || ''}">—</div>
+        </div>
+        <div class="cmd-card__body">
+          <div class="cmd-card__qty">${it.cantidad}×</div>
+          <div class="cmd-card__name">${escapeHtml(it.nombre)}</div>
+        </div>
+        ${mods ? `<ul class="cmd-card__mods">${mods}</ul>` : ''}
+        ${desc}
+        <div class="cmd-card__foot">
+          <span class="cmd-card__mesero">${escapeHtml(String(it.meseroNombre || '').split(' ')[0])}</span>
+          <div class="cmd-card__actions">${acciones}</div>
+        </div>
+      </article>
+    `;
+  },
+
+  tickCronos() {
+    const view = $('#view-comanda');
+    if (!view || !view.classList.contains('active')) return;
+    const now = Date.now();
+    $$('[data-crono-from]', view).forEach(el => {
+      const iso = el.dataset.cronoFrom;
+      if (!iso) { el.textContent = '—'; return; }
+      // El backend manda "yyyy-MM-dd HH:mm:ss" en zona Bogotá, sin TZ. Lo
+      // parseamos como local porque coincide con la zona del navegador
+      // (los meseros y la cocina están en el mismo lugar físico).
+      const ts = Date.parse(iso.replace(' ', 'T'));
+      if (isNaN(ts)) { el.textContent = '—'; return; }
+      const secs = Math.max(0, Math.floor((now - ts) / 1000));
+      const m = Math.floor(secs / 60);
+      const s = secs % 60;
+      el.textContent = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+      // Clases de alerta según minutos
+      el.classList.toggle('is-warn',  m >= 15 && m < 25);
+      el.classList.toggle('is-late',  m >= 25);
+    });
+  },
+
+  async cambiarEstado(itemId, nuevoEstado) {
+    const it = this.items[itemId];
+    if (!it) return;
+    // Optimista
+    this.optimistas[itemId] = nuevoEstado;
+    this.render();
+    playSoundOnce(nuevoEstado === 'LISTO' ? SOUNDS.ok : SOUNDS.click);
+
+    try {
+      await apiPost('marcarPrep', withUser({ itemId, nuevoEstado }));
+      // El listener RTDB confirmará y limpiará el optimista
+    } catch (e) {
+      delete this.optimistas[itemId];
+      this.render();
+      alertErr('Error', e.message);
+    }
+  },
+
+  desenganchar() {
+    if (this._ref) {
+      this._ref.off();
+      this._ref = null;
+    }
+    this.stopTicker();
+  },
+
+  setupListeners() { /* nada por ahora */ }
+};
+
+/* ============================================================
    INICIALIZACIÓN
    ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
@@ -2437,4 +2667,5 @@ window.addEventListener('DOMContentLoaded', () => {
   Inventario.setupListeners();
   // Fase 3
   Pedidos.setupListeners();
+   Comanda.setupListeners();
 });
