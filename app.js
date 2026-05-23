@@ -27,7 +27,7 @@ const firebaseConfig = {
 /* ============================================================
    CONSTANTES GENERALES
    ============================================================ */
-const APP_VERSION = '2026.05.23.2';   // se sobreescribe al leer version.json
+const APP_VERSION = '2026.05.23.3';   // se sobreescribe al leer version.json
 const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
@@ -1857,7 +1857,6 @@ const Pedidos = {
       this._refPedido.on('value', (snap) => {
         const data = snap.val();
         if (!data) {
-          // Borrado del RTDB → cobrado o cancelado en otro dispositivo
           this.pedidoActual = null;
           const dv = $('#view-pedido-detalle');
           if (dv && dv.classList.contains('active')) {
@@ -1866,7 +1865,24 @@ const Pedidos = {
           }
           return;
         }
+        // Preservar ítems _tmp que aún no se confirmen en este snapshot
+        const tmps = {};
+        if (this.pedidoActual && this.pedidoActual.items) {
+          Object.entries(this.pedidoActual.items).forEach(([id, it]) => {
+            if (it && it._tmp) tmps[id] = it;
+          });
+        }
         this.pedidoActual = { id: pedidoId, ...data };
+        if (!this.pedidoActual.items) this.pedidoActual.items = {};
+        Object.entries(tmps).forEach(([tmpId, tmpItem]) => {
+          const yaConfirmado = Object.values(this.pedidoActual.items).some(real =>
+            !real._tmp &&
+            real.productoId === tmpItem.productoId &&
+            Number(real.cantidad) === Number(tmpItem.cantidad) &&
+            Number(real.subtotal) === Number(tmpItem.subtotal)
+          );
+          if (!yaConfirmado) this.pedidoActual.items[tmpId] = tmpItem;
+        });
         this.renderDetalle();
       }, (err) => {
         console.error('RTDB listener pedido:', err);
@@ -1976,7 +1992,7 @@ const Pedidos = {
     }
 
     return `
-      <article class="pd-item ${cancelado ? 'is-cancelado' : ''}">
+      <article class="pd-item ${cancelado ? 'is-cancelado' : ''} ${it._tmp ? 'is-tmp' : ''}">
         <div class="pd-item__qty">${it.cantidad}×</div>
         <div class="pd-item__body">
           <div class="pd-item__head">
@@ -2244,23 +2260,63 @@ const Pedidos = {
     });
   },
 
-  async agregarItem(producto, datos) {
+ async agregarItem(producto, datos) {
     if (!this.pedidoActual) return;
-    startLoading();
+
+    // Optimistic UI: cerrar modal + volver al detalle YA
+    this.volverADetalle();
+    playSoundOnce(SOUNDS.pedido);
+
+    // Cálculos locales para mostrar el ítem antes de que el backend responda
+    const deltaTotal = (datos.modificadores || [])
+      .reduce((s, m) => s + (Number(m.precioDelta) || 0), 0);
+    const precio   = (Number(producto.precioBase) || 0) + deltaTotal;
+    const subtotal = precio * datos.cantidad;
+    const esPrep   = String(producto.tipo).toUpperCase() === 'PREPARACION';
+
+    const tmpId = 'tmp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+    const tmpItem = {
+      productoId:    producto.id,
+      nombre:        producto.nombre,
+      cantidad:      datos.cantidad,
+      precioUnitario: precio,
+      subtotal:      subtotal,
+      modificadores: datos.modificadores || [],
+      descripcion:   datos.descripcion || '',
+      esPreparacion: esPrep,
+      estadoPrep:    esPrep ? 'PENDIENTE' : 'NO_APLICA',
+      fechaPedido:   new Date().toISOString(),
+      cancelado:     false,
+      _tmp:          true
+    };
+    if (!this.pedidoActual.items) this.pedidoActual.items = {};
+    this.pedidoActual.items[tmpId] = tmpItem;
+    if (!this.pedidoActual.meta) this.pedidoActual.meta = {};
+    const meta = this.pedidoActual.meta;
+    meta.subtotal = (Number(meta.subtotal) || 0) + subtotal;
+    meta.total    = meta.subtotal - (Number(meta.descuentoValor) || 0);
+    this.renderDetalle();
+
+    Toast && Toast.fire({ icon: 'success', title: `${datos.cantidad}× ${producto.nombre}` });
+
+    // POST en background. El listener RTDB confirma (o no llega y revertimos).
     try {
       await apiPost('agregarItem', withUser({
-        pedidoId: this.pedidoActual.id,
-        productoId: producto.id,
-        cantidad: datos.cantidad,
+        pedidoId:      this.pedidoActual.id,
+        productoId:    producto.id,
+        cantidad:      datos.cantidad,
         modificadores: datos.modificadores,
-        descripcion: datos.descripcion
+        descripcion:   datos.descripcion
       }));
-      stopLoading();
-      playSoundOnce(SOUNDS.pedido);
-      Toast && Toast.fire({ icon: 'success', title: `${datos.cantidad}× ${producto.nombre}` });
-      this.volverADetalle();
     } catch (e) {
-      stopLoading();
+      // Revertir: borrar el tmp y restar del total
+      if (this.pedidoActual && this.pedidoActual.items && this.pedidoActual.items[tmpId]) {
+        delete this.pedidoActual.items[tmpId];
+        const m = this.pedidoActual.meta;
+        m.subtotal = (Number(m.subtotal) || 0) - subtotal;
+        m.total    = m.subtotal - (Number(m.descuentoValor) || 0);
+        this.renderDetalle();
+      }
       alertErr('Error al agregar', e.message);
     }
   },
