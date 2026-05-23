@@ -321,15 +321,21 @@
           <polyline points="12 19 5 12 12 5"/>
         </svg>
       </button>
-      <div class="pd-header-info">
+     <div class="pd-header-info">
         <h1 class="app-header__title">Mesa <span id="pd-mesa-num">?</span></h1>
         <div class="pd-header-meta">
           <span id="pd-mesero" class="pd-header-meta__mesero">—</span>
           <span class="pd-chip" id="pd-estado">—</span>
         </div>
       </div>
+      <button id="pd-fab-add" class="app-header__icon app-header__icon--add" title="Agregar producto">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"/>
+          <line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+      </button>
     </header>
-
     <div class="container pd-container">
       <div id="pd-items" class="pd-items-list">
         <!-- ítems del pedido inyectados desde RTDB -->
@@ -350,14 +356,7 @@
         <span id="pd-total">$ 0</span>
       </div>
     </footer>
-
-    <button id="pd-fab-add" class="fab" title="Agregar producto">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
-           stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="12" y1="5" x2="12" y2="19"/>
-        <line x1="5" y1="12" x2="19" y2="12"/>
-      </svg>
-    </button>
+    
   </section>
 
   <!-- ============================================================
