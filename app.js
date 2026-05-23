@@ -27,7 +27,7 @@ const firebaseConfig = {
 /* ============================================================
    CONSTANTES GENERALES
    ============================================================ */
-const APP_VERSION = '2026.05.23.4';  // se sobreescribe al leer version.json
+const APP_VERSION = '2026.05.23.5'; // se sobreescribe al leer version.json
 const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
@@ -1700,6 +1700,7 @@ const Pedidos = {
   // === Pedido abierto ===
   pedidoActual: null,
   _refPedido: null,
+  optimistas: {},       // { itemId: { estadoPrep?, cancelado? } } — overrides locales
 
   // === Catálogo para agregar items ===
   catalogo: null,
@@ -1887,6 +1888,18 @@ const Pedidos = {
           );
           if (!yaConfirmado) this.pedidoActual.items[tmpId] = tmpItem;
         });
+        // Limpiar overrides optimistas que ya coinciden con el snapshot real
+        Object.keys(this.optimistas).forEach(itemId => {
+          const real = this.pedidoActual.items[itemId];
+          if (!real) { delete this.optimistas[itemId]; return; }
+          const ov = this.optimistas[itemId];
+          const realEstado = String(real.estadoPrep || '').toUpperCase();
+          if (ov.estadoPrep && realEstado === String(ov.estadoPrep).toUpperCase()) {
+            delete this.optimistas[itemId];
+          } else if (ov.cancelado && real.cancelado) {
+            delete this.optimistas[itemId];
+          }
+        });
         this.renderDetalle();
       }, (err) => {
         console.error('RTDB listener pedido:', err);
@@ -1920,7 +1933,16 @@ const Pedidos = {
 
     const cont = $('#pd-items');
     const itemsArr = Object.entries(items)
-      .map(([id, it]) => ({ id, ...it }))
+      .map(([id, it]) => {
+        const ov = this.optimistas[id];
+        if (ov) {
+          const merged = { id, ...it, _tmp: true };
+          if (ov.estadoPrep)              merged.estadoPrep = ov.estadoPrep;
+          if (ov.cancelado !== undefined) merged.cancelado  = ov.cancelado;
+          return merged;
+        }
+        return { id, ...it };
+      })
       .sort((a, b) => String(a.fechaPedido).localeCompare(String(b.fechaPedido)));
 
     if (!itemsArr.length) {
@@ -2360,25 +2382,33 @@ const Pedidos = {
       if (!ok) return;
     }
 
-    startLoading();
+    // Optimista: marcar cancelado localmente → render → POST en background
+    this.optimistas[itemId] = { cancelado: true };
+    this.renderDetalle();
+    Toast && Toast.fire({ icon: 'success', title: 'Ítem cancelado' });
+
     try {
       await apiPost('cancelarItem', withUser({ itemId, motivo }));
-      stopLoading();
-      Toast && Toast.fire({ icon: 'success', title: 'Ítem cancelado' });
+      // El listener RTDB confirma y limpia el override
     } catch (e) {
-      stopLoading();
+      delete this.optimistas[itemId];
+      this.renderDetalle();
       alertErr('Error', e.message);
     }
   },
 
-  async marcarServido(itemId) {
-    startLoading();
+async marcarServido(itemId) {
+    if (!this.pedidoActual || !this.pedidoActual.items[itemId]) return;
+    // Optimista: aplicar override → render → POST en background
+    this.optimistas[itemId] = { estadoPrep: 'SERVIDO' };
+    this.renderDetalle();
+    playSoundOnce(SOUNDS.ok);
     try {
       await apiPost('marcarPrep', withUser({ itemId, nuevoEstado: 'SERVIDO' }));
-      stopLoading();
-      playSoundOnce(SOUNDS.ok);
+      // El listener RTDB confirma y limpia el override
     } catch (e) {
-      stopLoading();
+      delete this.optimistas[itemId];
+      this.renderDetalle();
       alertErr('Error', e.message);
     }
   },
