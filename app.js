@@ -27,7 +27,7 @@ const firebaseConfig = {
 /* ============================================================
    CONSTANTES GENERALES
    ============================================================ */
-const APP_VERSION = '2026.05.08.2';   // se sobreescribe al leer version.json
+const APP_VERSION = '2026.05.23.2';   // se sobreescribe al leer version.json
 const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
@@ -1683,14 +1683,28 @@ const Inventario = {
 
 /* ============================================================
    ============================================================
-   FASE 3 — VISTA TOMAR PEDIDO (grilla de mesas en vivo)
+   FASE 3 — TOMAR PEDIDO
+   Grilla en vivo + apertura/edición de pedido + catálogo embebido
    ============================================================
    ============================================================ */
 const Pedidos = {
-  mesasConfig: [],         // estática desde Sheets (numero, capacidad, zona)
-  estados: {},             // espejo de RTDB: { mesaId: {estado, pedidoId, ...} }
-  _refMesas: null,         // referencia Firebase (para no enganchar dos veces)
+  // === Grilla ===
+  mesasConfig: [],
+  estados: {},
+  _refMesas: null,
 
+  // === Pedido abierto ===
+  pedidoActual: null,
+  _refPedido: null,
+
+  // === Catálogo para agregar items ===
+  catalogo: null,
+  filtroCat: '',
+  expandidasCat: new Set(),
+
+  /* ────────────────────────────────────────────
+     ENTRADA / GRILLA
+     ──────────────────────────────────────────── */
   async abrir() {
     showView('tomar-pedido');
     await this.cargarInicial();
@@ -1700,9 +1714,7 @@ const Pedidos = {
   async cargarInicial() {
     startLoading();
     try {
-      // 1. Configuración estática de mesas (existe desde Fase 2)
       this.mesasConfig = await apiGet('listMesas');
-      // 2. Dispara que el backend proyecte el estado actual a RTDB
       await apiPost('sincronizarVistaPedidos', withUser({}));
       this.render();
     } catch (e) {
@@ -1713,7 +1725,7 @@ const Pedidos = {
   },
 
   async engancharRTDB() {
-    if (this._refMesas) return;       // idempotente
+    if (this._refMesas) return;
     const fb = await getFirebase();
     if (!fb) return;
     this._refMesas = fb.database()
@@ -1722,7 +1734,7 @@ const Pedidos = {
       this.estados = snap.val() || {};
       this.render();
     }, (err) => {
-      console.error('RTDB listener error:', err);
+      console.error('RTDB listener mesas:', err);
     });
   },
 
@@ -1760,7 +1772,7 @@ const Pedidos = {
       const cls      = this.claseEstado(estado);
       const libre    = estado === 'LIBRE';
       const pidiendo = estado === 'PIDIENDO_CUENTA' || st.pidiendoCuenta;
-      const mesero   = !libre && st.meseroNombre
+      const mesero = !libre && st.meseroNombre
         ? `<div class="mesa-tile__ped">${escapeHtml(String(st.meseroNombre).split(' ')[0])}</div>`
         : '';
       const total = (!libre && Number(st.total) > 0)
@@ -1780,10 +1792,576 @@ const Pedidos = {
       `;
     }).join('');
 
-    // Tap-to-open llega en 3A parte 2 (abrir pedido, catálogo embebido, etc.)
+    // Tap → abrir mesa
+    $$('[data-mesa-id]', cont).forEach(el => {
+      el.addEventListener('click', () => this.clickMesa(el.dataset.mesaId));
+    });
   },
 
-  setupListeners() { /* nada por ahora */ }
+  /* ────────────────────────────────────────────
+     ABRIR PEDIDO (crear o cargar)
+     ──────────────────────────────────────────── */
+  async clickMesa(mesaId) {
+    const st = this.estados[mesaId] || {};
+    playSoundOnce(SOUNDS.click);
+
+    if (st.pedidoId) {
+      // Permisos: SUPER/ADMIN abren cualquier pedido, MESERO sólo el suyo
+      const esMio = String(st.meseroId) === String(state.user.id);
+      const esSuperAdmin = rolEs('SUPERUSUARIO', 'ADMINISTRADOR');
+      if (!esSuperAdmin && !esMio) {
+        return alertWarn('Mesa ocupada',
+          `Esta mesa la abrió <b>${escapeHtml(st.meseroNombre || '?')}</b>. Sólo el mesero asignado puede modificar el pedido.`);
+      }
+      await this.abrirPedidoExistente(st.pedidoId);
+    } else {
+      const numero = (this.mesasConfig.find(m => m.id === mesaId) || {}).numero || '?';
+      const ok = await confirmar(`Abrir mesa ${numero}`,
+        `¿Crear un nuevo pedido en la mesa <b>#${numero}</b>?`, 'Sí, abrir');
+      if (!ok) return;
+      await this.crearYAbrirPedido(mesaId);
+    }
+  },
+
+  async crearYAbrirPedido(mesaId) {
+    startLoading();
+    try {
+      const r = await apiPost('crearPedido', withUser({ mesaId }));
+      stopLoading();
+      await this.abrirPedidoExistente(r.id);
+    } catch (e) {
+      stopLoading();
+      alertErr('Error al abrir mesa', e.message);
+    }
+  },
+
+  async abrirPedidoExistente(pedidoId) {
+    startLoading();
+    try {
+      await apiPost('sincronizarPedido', withUser({ id: pedidoId }));
+      this.engancharRTDBPedido(pedidoId);
+      showView('pedido-detalle');
+      stopLoading();
+    } catch (e) {
+      stopLoading();
+      alertErr('Error al cargar pedido', e.message);
+    }
+  },
+
+  engancharRTDBPedido(pedidoId) {
+    this.desengancharRTDBPedido();
+    getFirebase().then(fb => {
+      if (!fb) return;
+      const path = '/negocios/' + NEGOCIO_RESTAURANTE_ID + '/pedidos/' + pedidoId;
+      this._refPedido = fb.database().ref(path);
+      this._refPedido.on('value', (snap) => {
+        const data = snap.val();
+        if (!data) {
+          // Borrado del RTDB → cobrado o cancelado en otro dispositivo
+          this.pedidoActual = null;
+          const dv = $('#view-pedido-detalle');
+          if (dv && dv.classList.contains('active')) {
+            alertInfo('Pedido cerrado', 'Este pedido ya fue cobrado o cancelado.');
+            this.volverAGrilla();
+          }
+          return;
+        }
+        this.pedidoActual = { id: pedidoId, ...data };
+        this.renderDetalle();
+      }, (err) => {
+        console.error('RTDB listener pedido:', err);
+      });
+    });
+  },
+
+  desengancharRTDBPedido() {
+    if (this._refPedido) {
+      this._refPedido.off();
+      this._refPedido = null;
+    }
+  },
+
+  /* ────────────────────────────────────────────
+     VISTA DETALLE DEL PEDIDO
+     ──────────────────────────────────────────── */
+  renderDetalle() {
+    const p = this.pedidoActual;
+    if (!p) return;
+    const meta = p.meta || {};
+    const items = p.items || {};
+
+    $('#pd-mesa-num').textContent = meta.mesaNumero || '?';
+    $('#pd-mesero').textContent = meta.meseroNombre
+      ? String(meta.meseroNombre).split(' ')[0]
+      : '';
+    $('#pd-estado').textContent = this.labelEstado(meta.estado);
+    $('#pd-estado').className = 'pd-chip pd-chip--' +
+      String(meta.estado || 'ABIERTO').toLowerCase().replace('_', '-');
+
+    const cont = $('#pd-items');
+    const itemsArr = Object.entries(items)
+      .map(([id, it]) => ({ id, ...it }))
+      .sort((a, b) => String(a.fechaPedido).localeCompare(String(b.fechaPedido)));
+
+    if (!itemsArr.length) {
+      cont.innerHTML = `
+        <div class="pd-empty">
+          <div style="font-size:2.4rem; opacity:0.4;">🍽️</div>
+          <p class="muted">Aún no hay productos. Toca <b>+</b> para empezar.</p>
+        </div>`;
+    } else {
+      cont.innerHTML = itemsArr.map(it => this.renderItem(it)).join('');
+      $$('[data-item-cancel]', cont).forEach(b => {
+        b.addEventListener('click', () => this.cancelarItem(b.dataset.itemCancel));
+      });
+      $$('[data-item-servir]', cont).forEach(b => {
+        b.addEventListener('click', () => this.marcarServido(b.dataset.itemServir));
+      });
+    }
+
+    $('#pd-subtotal').textContent = fmtPesos(meta.subtotal || 0);
+    $('#pd-total').textContent = fmtPesos(meta.total || 0);
+    const descRow = $('#pd-descuento-row');
+    if ((meta.descuentoValor || 0) > 0) {
+      descRow.classList.remove('hidden');
+      $('#pd-descuento-pct').textContent = (meta.descuentoPct || 0) + '%';
+      $('#pd-descuento-val').textContent = '-' + fmtPesos(meta.descuentoValor || 0);
+    } else {
+      descRow.classList.add('hidden');
+    }
+  },
+
+  labelEstado(estado) {
+    const map = {
+      ABIERTO: 'Abierto',
+      EN_COCINA: 'En cocina',
+      PARCIAL_SERVIDO: 'Parcial',
+      SERVIDO: 'Servido',
+      PIDIENDO_CUENTA: 'Pidiendo cuenta'
+    };
+    return map[String(estado || '').toUpperCase()] || estado || '';
+  },
+
+  renderItem(it) {
+    const cancelado = it.cancelado;
+    const estPrep   = String(it.estadoPrep || '').toUpperCase();
+    const esRapido  = !it.esPreparacion;
+
+    const badge = (() => {
+      if (cancelado) return `<span class="pd-item__badge pd-item__badge--cancel">Cancelado</span>`;
+      if (esRapido)  return `<span class="pd-item__badge pd-item__badge--rapido">Listo</span>`;
+      switch (estPrep) {
+        case 'PENDIENTE':  return `<span class="pd-item__badge pd-item__badge--pendiente">Pendiente</span>`;
+        case 'PREPARANDO': return `<span class="pd-item__badge pd-item__badge--preparando">En cocina</span>`;
+        case 'LISTO':      return `<span class="pd-item__badge pd-item__badge--listo">¡Listo!</span>`;
+        case 'SERVIDO':    return `<span class="pd-item__badge pd-item__badge--servido">Servido</span>`;
+      }
+      return '';
+    })();
+
+    const mods = (it.modificadores || []).map(m =>
+      `<li class="pd-item__mod">${escapeHtml(m.nombreGrupo || m.grupo)}: <b>${escapeHtml(m.opcion)}</b></li>`
+    ).join('');
+    const desc = it.descripcion
+      ? `<div class="pd-item__desc">📝 ${escapeHtml(it.descripcion)}</div>`
+      : '';
+
+    let acciones = '';
+    if (!cancelado && estPrep !== 'SERVIDO') {
+      acciones += `<button class="pd-item__act pd-item__act--cancel" data-item-cancel="${it.id}" title="Cancelar">✕</button>`;
+      const puedeServir = esRapido || estPrep === 'LISTO';
+      if (puedeServir) {
+        acciones += `<button class="pd-item__act pd-item__act--servir" data-item-servir="${it.id}" title="Marcar servido">✓</button>`;
+      }
+    }
+
+    return `
+      <article class="pd-item ${cancelado ? 'is-cancelado' : ''}">
+        <div class="pd-item__qty">${it.cantidad}×</div>
+        <div class="pd-item__body">
+          <div class="pd-item__head">
+            <h4 class="pd-item__name">${escapeHtml(it.nombre)}</h4>
+            ${badge}
+          </div>
+          ${mods ? `<ul class="pd-item__mods">${mods}</ul>` : ''}
+          ${desc}
+          ${it.motivoCancelacion ? `<div class="pd-item__motivo">Motivo: ${escapeHtml(it.motivoCancelacion)}</div>` : ''}
+        </div>
+        <div class="pd-item__right">
+          <div class="pd-item__price">${fmtPesos(it.subtotal)}</div>
+          ${acciones ? `<div class="pd-item__actions">${acciones}</div>` : ''}
+        </div>
+      </article>
+    `;
+  },
+
+  volverAGrilla() {
+    this.desengancharRTDBPedido();
+    this.pedidoActual = null;
+    showView('tomar-pedido');
+  },
+
+  /* ────────────────────────────────────────────
+     CATÁLOGO EMBEBIDO
+     ──────────────────────────────────────────── */
+  async abrirCatalogo() {
+    if (!this.pedidoActual) return;
+    showView('pedido-catalogo');
+    if (!this.catalogo) await this.cargarCatalogo();
+    this.renderCatalogo();
+  },
+
+  async cargarCatalogo() {
+    startLoading();
+    try {
+      this.catalogo = await apiGet('getCatalogo');
+      if (this.expandidasCat.size === 0) {
+        const conProds = this.catalogo.categorias.find(c =>
+          this.catalogo.productos.some(p => p.categoriaId === c.id && p.disponible)
+        );
+        if (conProds) this.expandidasCat.add(conProds.id);
+      }
+    } catch (e) {
+      alertErr('Error al cargar catálogo', e.message);
+    } finally {
+      stopLoading();
+    }
+  },
+
+  renderCatalogo() {
+    const cont = $('#pc-content');
+    if (!cont || !this.catalogo) return;
+
+    const filtro = this.filtroCat.trim().toLowerCase();
+    const cats = this.catalogo.categorias;
+    const prodsPorCat = {};
+    this.catalogo.productos.forEach(p => {
+      if (!p.disponible) return;
+      if (filtro) {
+        const hit = p.nombre.toLowerCase().includes(filtro) ||
+                    (p.descripcion || '').toLowerCase().includes(filtro);
+        if (!hit) return;
+      }
+      if (!prodsPorCat[p.categoriaId]) prodsPorCat[p.categoriaId] = [];
+      prodsPorCat[p.categoriaId].push(p);
+    });
+
+    if (filtro) {
+      cats.forEach(c => { if ((prodsPorCat[c.id] || []).length) this.expandidasCat.add(c.id); });
+    }
+
+    const visibles = cats.filter(c => filtro ? (prodsPorCat[c.id] || []).length : true);
+    if (!visibles.length) {
+      cont.innerHTML = `<div class="card text-center"><h3>Sin resultados</h3></div>`;
+      return;
+    }
+
+    cont.innerHTML = visibles.map(cat => {
+      const prods = prodsPorCat[cat.id] || [];
+      const exp = this.expandidasCat.has(cat.id);
+      return `
+        <section class="cat-acordeon ${exp ? 'open' : ''}" data-cat="${cat.id}">
+          <button class="cat-acordeon__head" data-toggle-cat-pc="${cat.id}">
+            <span class="cat-acordeon__bullet" style="background:${cat.color || '#06402B'}"></span>
+            <span class="cat-acordeon__name">${escapeHtml(cat.nombre)}</span>
+            <span class="cat-acordeon__count">${prods.length}</span>
+            <svg class="cat-acordeon__chevron" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          <div class="cat-acordeon__body">
+            ${prods.length
+              ? `<div class="pc-prod-grid">${prods.map(p => this.renderProdMini(p)).join('')}</div>`
+              : `<p class="muted">Sin productos.</p>`}
+          </div>
+        </section>
+      `;
+    }).join('');
+
+    $$('[data-toggle-cat-pc]', cont).forEach(b => {
+      b.addEventListener('click', () => {
+        const id = b.dataset.toggleCatPc;
+        if (this.expandidasCat.has(id)) this.expandidasCat.delete(id);
+        else this.expandidasCat.add(id);
+        this.renderCatalogo();
+      });
+    });
+    $$('[data-pc-prod]', cont).forEach(b => {
+      b.addEventListener('click', () => {
+        const id = b.dataset.pcProd;
+        const p = this.catalogo.productos.find(x => x.id === id);
+        if (p) this.abrirModalProducto(p);
+      });
+    });
+  },
+
+  renderProdMini(p) {
+    const img = p.imagenUrl || PLACEHOLDER_PRODUCTO;
+    return `
+      <button class="pc-prod" data-pc-prod="${p.id}">
+        <img class="pc-prod__img" src="${img}" alt="${escapeHtml(p.nombre)}"
+             loading="lazy" onerror="this.src='${PLACEHOLDER_PRODUCTO}'" />
+        <div class="pc-prod__body">
+          <h4 class="pc-prod__name">${escapeHtml(p.nombre)}</h4>
+          <div class="pc-prod__price">${fmtPesos(p.precioBase)}</div>
+        </div>
+      </button>
+    `;
+  },
+
+  volverADetalle() {
+    showView('pedido-detalle');
+    this.renderDetalle();
+  },
+
+  /* ────────────────────────────────────────────
+     MODAL DE PRODUCTO (cantidad + mods + nota)
+     ──────────────────────────────────────────── */
+  abrirModalProducto(producto) {
+    const grupos = (this.catalogo.modificadores[producto.id] || []);
+    const self = this;
+
+    const gruposHTML = grupos.map((g, gi) => {
+      const isUnica = String(g.tipoSeleccion || 'UNICA').toUpperCase() === 'UNICA';
+      const opsHTML = g.opciones.map((o, oi) => {
+        const type = isUnica ? 'radio' : 'checkbox';
+        const name = isUnica ? `mp-g-${gi}` : `mp-g-${gi}-${oi}`;
+        const checked = (isUnica && g.obligatorio && oi === 0) ? 'checked' : '';
+        const delta = Number(o.precioDelta) || 0;
+        const deltaStr = delta === 0 ? '' :
+          (delta > 0 ? `+${fmtPesos(delta)}` : `${fmtPesos(delta)}`);
+        return `
+          <label class="mp-opt">
+            <input type="${type}" name="${name}" value="${oi}"
+                   data-mp-grupo="${gi}" data-mp-opcion="${oi}"
+                   data-mp-delta="${delta}" ${checked} />
+            <span class="mp-opt__name">${escapeHtml(o.opcion)}</span>
+            ${deltaStr ? `<span class="mp-opt__delta">${deltaStr}</span>` : ''}
+          </label>
+        `;
+      }).join('');
+      return `
+        <div class="mp-grupo">
+          <div class="mp-grupo__head">
+            <strong>${escapeHtml(g.nombreGrupo || g.grupo)}</strong>
+            ${g.obligatorio ? `<span class="mp-tag mp-tag--oblig">Obligatorio</span>` : ''}
+            <span class="mp-tag">${isUnica ? 'Única' : 'Múltiple'}</span>
+          </div>
+          <div class="mp-opts">${opsHTML}</div>
+        </div>
+      `;
+    }).join('');
+
+    Swal.fire({
+      title: producto.nombre,
+      html: `
+        <div class="mp">
+          <div class="mp__img-wrap">
+            <img class="mp__img" src="${producto.imagenUrl || PLACEHOLDER_PRODUCTO}"
+                 onerror="this.src='${PLACEHOLDER_PRODUCTO}'" />
+          </div>
+          ${producto.descripcion ? `<p class="mp__desc">${escapeHtml(producto.descripcion)}</p>` : ''}
+
+          <div class="mp__qty-row">
+            <span class="mp__qty-lbl">Cantidad</span>
+            <div class="mp__qty">
+              <button type="button" class="mp__qty-btn" data-mp-qty="-">−</button>
+              <input type="number" id="mp-cantidad" value="1" min="1" max="50" />
+              <button type="button" class="mp__qty-btn" data-mp-qty="+">+</button>
+            </div>
+          </div>
+
+          ${gruposHTML}
+
+          <label>Nota especial (opcional)</label>
+          <textarea id="mp-nota" placeholder="Ej: sin cebolla, punto medio…"></textarea>
+
+          <div class="mp__total-row">
+            <span>Total</span>
+            <span class="mp__total" id="mp-total">${fmtPesos(producto.precioBase)}</span>
+          </div>
+        </div>
+      `,
+      width: 560,
+      showCancelButton: true,
+      confirmButtonText: 'Agregar al pedido',
+      cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      focusConfirm: false,
+      didOpen: () => {
+        const recalc = () => {
+          const cant = Math.max(1, Number($('#mp-cantidad').value) || 1);
+          let delta = 0;
+          $$('input[data-mp-delta]:checked').forEach(el => {
+            delta += Number(el.dataset.mpDelta) || 0;
+          });
+          const total = (Number(producto.precioBase) + delta) * cant;
+          $('#mp-total').textContent = fmtPesos(total);
+        };
+        $$('[data-mp-qty]').forEach(b => {
+          b.addEventListener('click', () => {
+            const inp = $('#mp-cantidad');
+            let v = Math.max(1, Number(inp.value) || 1);
+            v = b.dataset.mpQty === '+' ? Math.min(50, v + 1) : Math.max(1, v - 1);
+            inp.value = v;
+            recalc();
+          });
+        });
+        $('#mp-cantidad').addEventListener('input', recalc);
+        $$('input[data-mp-delta]').forEach(el => el.addEventListener('change', recalc));
+        recalc();
+      },
+      preConfirm: () => {
+        const seleccion = [];
+        for (let gi = 0; gi < grupos.length; gi++) {
+          const g = grupos[gi];
+          const checks = $$(`input[data-mp-grupo="${gi}"]:checked`);
+          if (g.obligatorio && !checks.length) {
+            Swal.showValidationMessage(`Selecciona una opción en "${g.nombreGrupo || g.grupo}"`);
+            return false;
+          }
+          checks.forEach(el => {
+            const oi = Number(el.dataset.mpOpcion);
+            const op = g.opciones[oi];
+            seleccion.push({
+              grupo: g.grupo,
+              nombreGrupo: g.nombreGrupo || g.grupo,
+              opcion: op.opcion,
+              precioDelta: Number(op.precioDelta) || 0
+            });
+          });
+        }
+        return {
+          cantidad: Math.max(1, Number($('#mp-cantidad').value) || 1),
+          modificadores: seleccion,
+          descripcion: $('#mp-nota').value.trim()
+        };
+      }
+    }).then(async (res) => {
+      if (!res.isConfirmed) return;
+      await self.agregarItem(producto, res.value);
+    });
+  },
+
+  async agregarItem(producto, datos) {
+    if (!this.pedidoActual) return;
+    startLoading();
+    try {
+      await apiPost('agregarItem', withUser({
+        pedidoId: this.pedidoActual.id,
+        productoId: producto.id,
+        cantidad: datos.cantidad,
+        modificadores: datos.modificadores,
+        descripcion: datos.descripcion
+      }));
+      stopLoading();
+      playSoundOnce(SOUNDS.pedido);
+      Toast && Toast.fire({ icon: 'success', title: `${datos.cantidad}× ${producto.nombre}` });
+      this.volverADetalle();
+    } catch (e) {
+      stopLoading();
+      alertErr('Error al agregar', e.message);
+    }
+  },
+
+  /* ────────────────────────────────────────────
+     ACCIONES SOBRE ITEMS
+     ──────────────────────────────────────────── */
+  async cancelarItem(itemId) {
+    const p = this.pedidoActual;
+    if (!p) return;
+    const it = (p.items || {})[itemId];
+    if (!it) return;
+    const estPrep = String(it.estadoPrep || '').toUpperCase();
+    const requiereMotivo = it.esPreparacion && estPrep !== 'PENDIENTE';
+
+    let motivo = '';
+    if (requiereMotivo) {
+      const r = await Swal.fire({
+        title: 'Cancelar ítem',
+        html: `
+          <p>Este ítem ya fue enviado a cocina. Indica el motivo:</p>
+          <input id="ci-motivo" type="text" placeholder="Ej: error de mesa, cliente cambió de opinión…" />
+        `,
+        showCancelButton: true, confirmButtonText: 'Cancelar ítem', cancelButtonText: 'Volver',
+        reverseButtons: true,
+        preConfirm: () => {
+          const m = $('#ci-motivo').value.trim();
+          if (!m) { Swal.showValidationMessage('El motivo es obligatorio'); return false; }
+          return m;
+        }
+      });
+      if (!r.isConfirmed) return;
+      motivo = r.value;
+    } else {
+      const ok = await confirmar('Quitar ítem',
+        `¿Quitar <b>${escapeHtml(it.nombre)}</b> del pedido?`, 'Sí, quitar');
+      if (!ok) return;
+    }
+
+    startLoading();
+    try {
+      await apiPost('cancelarItem', withUser({ itemId, motivo }));
+      stopLoading();
+      Toast && Toast.fire({ icon: 'success', title: 'Ítem cancelado' });
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  async marcarServido(itemId) {
+    startLoading();
+    try {
+      await apiPost('marcarPrep', withUser({ itemId, nuevoEstado: 'SERVIDO' }));
+      stopLoading();
+      playSoundOnce(SOUNDS.ok);
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  /* ────────────────────────────────────────────
+     LISTENERS GLOBALES
+     ──────────────────────────────────────────── */
+  setupListeners() {
+    const fab = $('#pd-fab-add');
+    if (fab && !fab._bound) {
+      fab.addEventListener('click', () => this.abrirCatalogo());
+      fab._bound = true;
+    }
+    const back = $('#pc-back');
+    if (back && !back._bound) {
+      back.addEventListener('click', () => this.volverADetalle());
+      back._bound = true;
+    }
+    const backDet = $('#pd-back');
+    if (backDet && !backDet._bound) {
+      backDet.addEventListener('click', () => this.volverAGrilla());
+      backDet._bound = true;
+    }
+    const sBtn = $('#pc-search-btn');
+    const sBar = $('#pc-search-bar');
+    const sInp = $('#pc-search-input');
+    if (sBtn && !sBtn._bound) {
+      sBtn.addEventListener('click', () => {
+        sBar.classList.toggle('hidden');
+        if (!sBar.classList.contains('hidden')) sInp.focus();
+        else { sInp.value = ''; this.filtroCat = ''; this.renderCatalogo(); }
+      });
+      sBtn._bound = true;
+    }
+    if (sInp && !sInp._bound) {
+      let t = null;
+      sInp.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(() => { this.filtroCat = sInp.value; this.renderCatalogo(); }, 180);
+      });
+      sInp._bound = true;
+    }
+  }
 };
 
 /* ============================================================
