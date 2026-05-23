@@ -2089,3 +2089,262 @@ textarea { resize: vertical; min-height: 80px; }
   0%, 100% { opacity: 0.4; }
   50%      { opacity: 0.95; }
 }
+
+/* ============================================================
+   ============================================================
+   FASE 3B — COMANDA COCINA
+   ============================================================
+   ============================================================ */
+
+/* Container más ancho para el tablero */
+.container--wide {
+  max-width: 1600px;
+}
+
+/* Tablero kanban */
+.kanban {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  margin-top: 12px;
+}
+@media (min-width: 720px) {
+  .kanban { grid-template-columns: repeat(3, 1fr); }
+}
+
+.kanban-col {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-sm);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+}
+.kanban-col__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+.kanban-col__head h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1rem;
+  margin: 0;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.kanban-col__count {
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+}
+.kanban-col__body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+.kanban-col__empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  padding: 20px 0;
+}
+
+/* Colores por columna */
+.kanban-col--pendiente  .kanban-col__head { background: rgba(220,38,38,0.06); }
+.kanban-col--pendiente  .kanban-col__head h3 { color: var(--error); }
+.kanban-col--pendiente  .kanban-col__count { background: rgba(220,38,38,0.12); color: var(--error); }
+
+.kanban-col--preparando .kanban-col__head { background: rgba(234,88,12,0.06); }
+.kanban-col--preparando .kanban-col__head h3 { color: #c2410c; }
+.kanban-col--preparando .kanban-col__count { background: rgba(234,88,12,0.14); color: #c2410c; }
+
+.kanban-col--listo      .kanban-col__head { background: rgba(245,158,11,0.06); }
+.kanban-col--listo      .kanban-col__head h3 { color: #b45309; }
+.kanban-col--listo      .kanban-col__count { background: rgba(245,158,11,0.16); color: #b45309; }
+
+/* Tarjeta de cocina */
+.cmd-card {
+  position: relative;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  border-left-width: 5px;
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: var(--sh-sm);
+  transition: transform 0.12s, box-shadow 0.15s;
+}
+.cmd-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--sh-md);
+}
+.cmd-card.is-tmp { opacity: 0.7; border-style: dashed; }
+.cmd-card.is-tmp::after {
+  content: '⏳';
+  position: absolute;
+  top: 6px; right: 6px;
+  font-size: 0.85rem;
+  animation: tmpPulse 1.4s ease-in-out infinite;
+}
+
+.cmd-card--pendiente  { border-left-color: var(--error); }
+.cmd-card--preparando { border-left-color: #ea580c; }
+.cmd-card--listo      {
+  border-left-color: var(--warn);
+  background: linear-gradient(90deg, rgba(245,158,11,0.06), var(--bg-card) 60%);
+  animation: cmdReadyPulse 1.6s ease-in-out infinite;
+}
+@keyframes cmdReadyPulse {
+  0%, 100% { box-shadow: var(--sh-sm); }
+  50%      { box-shadow: 0 0 0 3px rgba(245,158,11,0.20), var(--sh-md); }
+}
+
+.cmd-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cmd-card__mesa {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  color: var(--text-soft);
+}
+.cmd-card__mesa b {
+  font-weight: 900;
+  color: var(--primary);
+  font-size: 1.15rem;
+}
+.cmd-card__crono {
+  font-family: 'IBM Plex Mono', 'Courier New', monospace;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-soft);
+  background: var(--bg-soft);
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  letter-spacing: 0.5px;
+  font-variant-numeric: tabular-nums;
+}
+.cmd-card__crono.is-warn {
+  background: rgba(234,88,12,0.14);
+  color: #c2410c;
+}
+.cmd-card__crono.is-late {
+  background: rgba(220,38,38,0.14);
+  color: var(--error);
+  animation: cronoLate 1s ease-in-out infinite;
+}
+@keyframes cronoLate {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.06); }
+}
+
+.cmd-card__body {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.cmd-card__qty {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.4rem;
+  color: var(--accent);
+  flex-shrink: 0;
+  min-width: 32px;
+}
+.cmd-card__name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--primary);
+  line-height: 1.15;
+  flex: 1;
+}
+
+.cmd-card__mods {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-soft);
+}
+.cmd-card__mods li { padding: 1px 0; }
+.cmd-card__mods b { color: var(--primary); font-weight: 700; }
+
+.cmd-card__desc {
+  font-size: 0.76rem;
+  color: var(--text-soft);
+  background: var(--accent-soft);
+  border-radius: var(--r-sm);
+  padding: 4px 8px;
+}
+
+.cmd-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.cmd-card__mesero {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.cmd-card__actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.cmd-btn {
+  padding: 6px 12px;
+  border-radius: var(--r-sm);
+  font-weight: 700;
+  font-size: 0.82rem;
+  font-family: var(--font-body);
+  transition: transform 0.1s, background 0.15s, color 0.15s, border-color 0.15s;
+  border: 1.5px solid transparent;
+  white-space: nowrap;
+}
+.cmd-btn:active { transform: scale(0.94); }
+.cmd-btn--start {
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(234,88,12,0.30);
+}
+.cmd-btn--ready {
+  background: linear-gradient(135deg, #facc15 0%, #f59e0b 100%);
+  color: #422006;
+  box-shadow: 0 2px 6px rgba(245,158,11,0.30);
+}
+.cmd-btn--back {
+  background: var(--bg-soft);
+  color: var(--text-soft);
+  border-color: var(--border-strong);
+  padding: 6px 9px;
+  font-size: 0.9rem;
+}
+.cmd-btn--back:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
