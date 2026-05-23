@@ -2050,3 +2050,42 @@ textarea { resize: vertical; min-height: 80px; }
   letter-spacing: 0;
   text-transform: none;
 }
+
+/* ============================================================
+   FASE 3 — Refinamientos
+   ============================================================ */
+
+/* Botón "+" del header (acción primaria, acento dorado) */
+.app-header__icon--add {
+  background: linear-gradient(135deg, var(--accent-light) 0%, var(--accent) 100%);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(194, 121, 42, 0.30);
+}
+.app-header__icon--add:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.app-header__icon--add:active {
+  transform: scale(0.94);
+}
+
+/* Ítem optimista: aún no confirmado por el backend */
+.pd-item.is-tmp {
+  opacity: 0.62;
+  border-style: dashed;
+  background: linear-gradient(90deg, var(--bg-card) 0%, var(--bg-soft) 100%);
+}
+.pd-item.is-tmp::after {
+  content: '⏳';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 0.95rem;
+  animation: tmpPulse 1.4s ease-in-out infinite;
+  pointer-events: none;
+}
+.pd-item { position: relative; }
+@keyframes tmpPulse {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 0.95; }
+}
