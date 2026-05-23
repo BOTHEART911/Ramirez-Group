@@ -476,7 +476,7 @@ function irAMenuRestaurante() {
       key: 'tomar-pedido', titulo: 'Tomar pedido', desc: 'Mesas y comandas',
       icono: ICONOS.mesa,
       roles: ['SUPERUSUARIO','ADMINISTRADOR','MESERO'],
-      view: 'pendiente', placeholder: 'Toma de pedido'
+      view: 'tomar-pedido'
     },
     {
       key: 'comanda', titulo: 'Comanda', desc: 'Vista de cocina',
@@ -552,7 +552,7 @@ function irAMenuRestaurante() {
       <div class="menu-tile__title">${t.titulo}</div>
       <div class="menu-tile__desc">${t.desc}</div>
     `;
-    tile.addEventListener('click', () => {
+   tile.addEventListener('click', () => {
       playSoundOnce(SOUNDS.click);
       if (t.view === 'pendiente') {
         $('#pendiente-title').textContent = t.placeholder;
@@ -564,6 +564,8 @@ function irAMenuRestaurante() {
         Mesas.abrir();
       } else if (t.view === 'inventario') {
         Inventario.abrir();
+      } else if (t.view === 'tomar-pedido') {
+        Pedidos.abrir();
       } else {
         showView(t.view);
       }
@@ -1680,6 +1682,111 @@ const Inventario = {
 };
 
 /* ============================================================
+   ============================================================
+   FASE 3 — VISTA TOMAR PEDIDO (grilla de mesas en vivo)
+   ============================================================
+   ============================================================ */
+const Pedidos = {
+  mesasConfig: [],         // estática desde Sheets (numero, capacidad, zona)
+  estados: {},             // espejo de RTDB: { mesaId: {estado, pedidoId, ...} }
+  _refMesas: null,         // referencia Firebase (para no enganchar dos veces)
+
+  async abrir() {
+    showView('tomar-pedido');
+    await this.cargarInicial();
+    await this.engancharRTDB();
+  },
+
+  async cargarInicial() {
+    startLoading();
+    try {
+      // 1. Configuración estática de mesas (existe desde Fase 2)
+      this.mesasConfig = await apiGet('listMesas');
+      // 2. Dispara que el backend proyecte el estado actual a RTDB
+      await apiPost('sincronizarVistaPedidos', withUser({}));
+      this.render();
+    } catch (e) {
+      alertErr('Error al cargar mesas', e.message);
+    } finally {
+      stopLoading();
+    }
+  },
+
+  async engancharRTDB() {
+    if (this._refMesas) return;       // idempotente
+    const fb = await getFirebase();
+    if (!fb) return;
+    this._refMesas = fb.database()
+      .ref('/negocios/' + NEGOCIO_RESTAURANTE_ID + '/mesas');
+    this._refMesas.on('value', (snap) => {
+      this.estados = snap.val() || {};
+      this.render();
+    }, (err) => {
+      console.error('RTDB listener error:', err);
+    });
+  },
+
+  claseEstado(estado) {
+    switch (String(estado || 'LIBRE').toUpperCase()) {
+      case 'ABIERTO':
+      case 'EN_COCINA':         return 'mesa-pedido';
+      case 'PARCIAL_SERVIDO':   return 'mesa-parcial';
+      case 'SERVIDO':
+      case 'PIDIENDO_CUENTA':   return 'mesa-servida';
+      default:                  return 'mesa-libre';
+    }
+  },
+
+  render() {
+    const cont = $('#tomar-pedido-content');
+    if (!cont) return;
+
+    if (!this.mesasConfig.length) {
+      cont.innerHTML = `
+        <div class="card text-center" style="margin-top:16px;">
+          <h3>No hay mesas configuradas</h3>
+          <p class="muted">Ve a <b>Mesas</b> en el menú principal para crear la primera.</p>
+        </div>`;
+      return;
+    }
+
+    const sorted = [...this.mesasConfig].sort(
+      (a, b) => Number(a.numero) - Number(b.numero)
+    );
+
+    cont.innerHTML = sorted.map(m => {
+      const st       = this.estados[m.id] || {};
+      const estado   = (st.estado || 'LIBRE').toUpperCase();
+      const cls      = this.claseEstado(estado);
+      const libre    = estado === 'LIBRE';
+      const pidiendo = estado === 'PIDIENDO_CUENTA' || st.pidiendoCuenta;
+      const mesero   = !libre && st.meseroNombre
+        ? `<div class="mesa-tile__ped">${escapeHtml(String(st.meseroNombre).split(' ')[0])}</div>`
+        : '';
+      const total = (!libre && Number(st.total) > 0)
+        ? `<div class="mesa-tile__total">${fmtPesos(st.total)}</div>`
+        : '';
+      const badge = pidiendo
+        ? `<span class="mesa-tile__badge" title="Pidiendo cuenta">💰</span>`
+        : '';
+      return `
+        <div class="mesa-tile ${cls}" data-mesa-id="${m.id}">
+          ${badge}
+          <div class="mesa-tile__num">${m.numero}</div>
+          ${mesero}
+          ${total}
+          <div class="mesa-tile__zona">${escapeHtml(m.zona || 'SALON')}</div>
+        </div>
+      `;
+    }).join('');
+
+    // Tap-to-open llega en 3A parte 2 (abrir pedido, catálogo embebido, etc.)
+  },
+
+  setupListeners() { /* nada por ahora */ }
+};
+
+/* ============================================================
    INICIALIZACIÓN
    ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
@@ -1694,4 +1801,6 @@ window.addEventListener('DOMContentLoaded', () => {
   Catalogo.setupListeners();
   Mesas.setupListeners();
   Inventario.setupListeners();
+  // Fase 3
+  Pedidos.setupListeners();
 });
