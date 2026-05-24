@@ -2941,7 +2941,13 @@ htmlModalCobro(p, st) {
               <span id="cb-cli-status" class="cobro__cli-status"></span>
             </div>
             <p class="muted" style="font-size:0.74rem; margin-top:4px;">
-              📱 Se enviará el ticket por WhatsApp al cerrar la cuenta.
+              📱 Se enviará el resumen por WhatsApp al cerrar la cuenta.
+            </p>
+            <button type="button" id="cb-btn-ticket" class="btn-ticket-pdf" disabled>
+              🧾 Generar ticket PDF
+            </button>
+            <p class="muted" id="cb-ticket-hint" style="font-size:0.72rem; margin-top:4px;">
+              Opcional. Si lo generas, se incluirá el link en el WhatsApp.
             </p>
           </div>
         </div>
@@ -2993,13 +2999,45 @@ htmlModalCobro(p, st) {
     `;
   },
 
- bindModalCobro(p, st) {
+bindModalCobro(p, st) {
     const self = this;
     const upd = () => {
       $('#cb-subtotal').textContent  = fmtPesos(st.subtotal);
       $('#cb-desc-val').textContent  = '-' + fmtPesos(st.descuentoValor);
       $('#cb-total').textContent     = fmtPesos(st.total);
     };
+
+    // Fase 4 — habilita/deshabilita botón "Generar ticket PDF" según el estado
+    const updTicketBtn = () => {
+      const btn  = $('#cb-btn-ticket');
+      const hint = $('#cb-ticket-hint');
+      if (!btn) return;
+      if (st.ticketUrl) {
+        btn.textContent = '✓ Ticket creado';
+        btn.disabled = true;
+        btn.classList.add('is-done');
+        if (hint) hint.textContent = 'Se enviará el link al cerrar la cuenta.';
+        return;
+      }
+      if (st.ticketGenerando) {
+        btn.textContent = '⏳ Generando…';
+        btn.disabled = true;
+        return;
+      }
+      btn.textContent = '🧾 Generar ticket PDF';
+      btn.classList.remove('is-done');
+      const nombreOk = (st.clienteNombre || '').trim().length > 0;
+      const telOk    = /^3\d{9}$/.test(st.clienteTelefono || '');
+      btn.disabled = st.esGenerico || !nombreOk || !telOk;
+      if (hint) {
+        hint.textContent = st.esGenerico
+          ? 'Solo disponible para clientes identificados.'
+          : 'Opcional. Si lo generas, se incluirá el link en el WhatsApp.';
+      }
+    };
+
+    // Click del botón
+    $('#cb-btn-ticket').addEventListener('click', () => self.crearTicket(p, st, updTicketBtn));
 
     // Fase 4 — Toggle Cliente general
     const chkGen      = $('#cb-generico');
@@ -3015,15 +3053,19 @@ htmlModalCobro(p, st) {
         st.clienteNombre = '';
         st.clienteTelefono = '';
         st.clienteIdExistente = null;
+        // Fase 4 — si había ticket creado, se invalida al volver a genérico
+        st.ticketUrl = null;
         statusCli.textContent = '';
         statusCli.className = 'cobro__cli-status';
         inpNombre.value = '';
         inpTel.value = '';
       }
+      updTicketBtn();
     });
 
     inpNombre.addEventListener('input', () => {
       st.clienteNombre = inpNombre.value.trim();
+      updTicketBtn();
     });
 
     // Lookup por teléfono con debounce
@@ -3034,6 +3076,9 @@ htmlModalCobro(p, st) {
       if (v !== inpTel.value) inpTel.value = v;
       st.clienteTelefono = v;
       st.clienteIdExistente = null;
+      // Fase 4 — si había ticket y se cambia el teléfono, invalidar
+      if (st.ticketUrl) st.ticketUrl = null;
+      updTicketBtn();
 
       // Estado visual del campo
       if (v.length === 0) {
@@ -3104,7 +3149,7 @@ htmlModalCobro(p, st) {
       });
     });
 
-    // Comprobante
+  // Comprobante
     $('#cb-comprobante').addEventListener('change', async (e) => {
       const file = e.target.files && e.target.files[0];
       if (!file) return;
@@ -3119,6 +3164,9 @@ htmlModalCobro(p, st) {
         $('#cb-file-name').textContent = '✓ ' + file.name;
       } catch (err) { alertErr('Error', err.message); }
     });
+
+    // Fase 4 — pintar estado inicial del botón de ticket
+    updTicketBtn();
   },
 
  validarCobro(p, st) {
@@ -3222,9 +3270,46 @@ htmlModalCobro(p, st) {
         : 'Pedido cobrado · 📱 Ticket enviado por WhatsApp';
       Toast && Toast.fire({ icon: 'success', title: tituloOk });
       // El listener RTDB borrará la tarjeta automáticamente
-    } catch (e) {
+ } catch (e) {
       stopLoading();
       alertErr('Error al cobrar', e.message);
+    }
+  },
+
+  /* ────────────────────────────────────────────
+     FASE 4 — Generar ticket PDF bajo demanda
+     ──────────────────────────────────────────── */
+  async crearTicket(p, st, refresh) {
+    // Validación local (defensiva, el botón ya debería estar deshabilitado)
+    const nombre = (st.clienteNombre || '').trim();
+    const tel    = (st.clienteTelefono || '').trim();
+    if (st.esGenerico) return;
+    if (!nombre) return alertWarn('Falta el nombre', 'Ingresa el nombre del cliente.');
+    if (!/^3\d{9}$/.test(tel)) return alertWarn('WhatsApp inválido', '10 dígitos, inicia en 3.');
+
+    st.ticketGenerando = true;
+    refresh();
+
+    try {
+      // 1. Asignar cliente al pedido (mismo flujo que ejecutarCobro)
+      await apiPost('asignarClientePedido', withUser({
+        pedidoId:   st.pedidoId,
+        esGenerico: false,
+        cliente:    { nombre, telefono: tel }
+      }));
+
+      // 2. Generar el PDF — SIN swallow, el error sube si falla
+      const r = await apiPost('generarTicket', withUser({ pedidoId: st.pedidoId }));
+      st.ticketUrl = r.ticketUrl;
+      st.ticketGenerando = false;
+      refresh();
+
+      playSoundOnce(SOUNDS.ok);
+      alertOk('Ticket creado', 'Se enviará al cobrar.');
+    } catch (e) {
+      st.ticketGenerando = false;
+      refresh();
+      alertErr('No se pudo crear el ticket', e.message);
     }
   },
 
