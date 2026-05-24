@@ -2666,3 +2666,29 @@ textarea { resize: vertical; min-height: 80px; }
   color: var(--ok);
   opacity: 1;
 }
+
+/* Fase 4 — Banner inline dentro del modal de cobro (feedback del ticket) */
+.cobro__banner-ticket {
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  font-weight: 700;
+  font-size: 0.88rem;
+  text-align: center;
+  margin-bottom: 12px;
+  animation: viewIn 0.22s ease-out;
+  transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+}
+.cobro__banner-ticket.is-fading {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+.cobro__banner-ticket--ok {
+  background: rgba(22, 163, 74, 0.12);
+  color: var(--ok);
+  border: 1.5px solid var(--ok);
+}
+.cobro__banner-ticket--err {
+  background: rgba(220, 38, 38, 0.10);
+  color: var(--error);
+  border: 1.5px solid var(--error);
+}
