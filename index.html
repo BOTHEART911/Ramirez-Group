@@ -342,7 +342,7 @@
       </div>
     </div>
 
-    <footer class="pd-footer">
+  <footer class="pd-footer">
       <div class="pd-row">
         <span>Subtotal</span>
         <span id="pd-subtotal">$ 0</span>
@@ -355,6 +355,9 @@
         <span>TOTAL</span>
         <span id="pd-total">$ 0</span>
       </div>
+      <button id="pd-btn-cuenta" class="btn btn-accent btn-block mt-sm hidden">
+        💰 Pedir cuenta
+      </button>
     </footer>
     
   </section>
@@ -413,6 +416,30 @@
       <div id="comanda-content">
         <!-- Tablero kanban inyectado dinámicamente -->
       </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       VISTA CAJA  (Fase 3C)
+       ============================================================ -->
+  <section id="view-caja" class="view">
+    <header class="app-header">
+      <button class="app-header__back" data-go="restaurante" title="Volver">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"/>
+          <polyline points="12 19 5 12 12 5"/>
+        </svg>
+      </button>
+      <div class="pd-header-info">
+        <h1 class="app-header__title">Caja</h1>
+        <div class="pd-header-meta">
+          <span id="caja-subtitle" class="pd-header-meta__mesero">—</span>
+        </div>
+      </div>
+    </header>
+    <div class="container">
+      <div id="caja-content"><!-- Tarjetas inyectadas dinámicamente --></div>
     </div>
   </section>
 
