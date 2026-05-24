@@ -27,7 +27,7 @@ const firebaseConfig = {
 /* ============================================================
    CONSTANTES GENERALES
    ============================================================ */
-const APP_VERSION = '2026.05.24.1'; // se sobreescribe al leer version.json
+const APP_VERSION = '2026.05.23.6'; // se sobreescribe al leer version.json
 const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
@@ -1719,7 +1719,7 @@ const Pedidos = {
     await this.engancharRTDB();
   },
 
-async cargarInicial() {
+  async cargarInicial() {
     startLoading();
     try {
       this.mesasConfig = await apiGet('listMesas');
@@ -2880,7 +2880,7 @@ async cargarInicial() {
   async abrirModalCobro(pedidoId) {
     const p = this.pedidos[pedidoId];
     if (!p) return;
-// Estado interno del modal
+ // Estado interno del modal
     const st = {
       pedidoId,
       subtotal:       Number(p.subtotal) || 0,
@@ -2918,7 +2918,7 @@ async cargarInicial() {
     });
   },
 
- htmlModalCobro(p, st) {
+htmlModalCobro(p, st) {
     return `
       <div class="cobro">
 
