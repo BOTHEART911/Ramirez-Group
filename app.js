@@ -3287,13 +3287,15 @@ bindModalCobro(p, st) {
   /* ────────────────────────────────────────────
      FASE 4 — Generar ticket PDF bajo demanda
      ──────────────────────────────────────────── */
-  async crearTicket(p, st, refresh) {
-    // Validación local (defensiva, el botón ya debería estar deshabilitado)
+ async crearTicket(p, st, refresh) {
+    // Validaciones SIN alertWarn (alertWarn dispara Swal.fire y cierra el modal de cobro)
     const nombre = (st.clienteNombre || '').trim();
     const tel    = (st.clienteTelefono || '').trim();
     if (st.esGenerico) return;
-    if (!nombre) return alertWarn('Falta el nombre', 'Ingresa el nombre del cliente.');
-    if (!/^3\d{9}$/.test(tel)) return alertWarn('WhatsApp inválido', '10 dígitos, inicia en 3.');
+    if (!nombre || !/^3\d{9}$/.test(tel)) {
+      Toast && Toast.fire({ icon: 'warning', title: 'Datos del cliente incompletos' });
+      return;
+    }
 
     st.ticketGenerando = true;
     refresh();
@@ -3317,7 +3319,8 @@ bindModalCobro(p, st) {
     } catch (e) {
       st.ticketGenerando = false;
       refresh();
-      alertErr('No se pudo crear el ticket', e.message);
+      // Toast en vez de alertErr para no cerrar el modal de cobro
+      Toast && Toast.fire({ icon: 'error', title: 'No se pudo crear el ticket: ' + e.message, timer: 4500 });
     }
   },
 
