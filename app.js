@@ -3305,7 +3305,7 @@ bindModalCobro(p, st) {
       refresh();
 
       playSoundOnce(SOUNDS.ok);
-      alertOk('Ticket creado', 'Se enviará al cobrar.');
+      Toast && Toast.fire({ icon: 'success', title: 'Ticket creado · Se enviará al cobrar' });
     } catch (e) {
       st.ticketGenerando = false;
       refresh();
