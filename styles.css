@@ -2634,3 +2634,35 @@ textarea { resize: vertical; min-height: 80px; }
 .cobro__cli-status.is-new     { color: var(--accent); }
 .cobro__cli-status.is-err     { color: var(--error); }
 .cobro__cli-status.is-loading { color: var(--text-muted); animation: tmpPulse 1.2s ease-in-out infinite; }
+
+/* Fase 4 — Botón "Generar ticket PDF" en modal de cobro */
+.btn-ticket-pdf {
+  width: 100%;
+  margin-top: 12px;
+  padding: 11px 16px;
+  border-radius: var(--r-md);
+  border: 1.5px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.9rem;
+  font-family: var(--font-body);
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s, opacity 0.15s;
+}
+.btn-ticket-pdf:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-ticket-pdf:active:not(:disabled) { transform: scale(0.97); }
+.btn-ticket-pdf:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn-ticket-pdf.is-done {
+  background: rgba(22, 163, 74, 0.10);
+  border-color: var(--ok);
+  color: var(--ok);
+  opacity: 1;
+}
