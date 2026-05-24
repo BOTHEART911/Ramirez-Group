@@ -27,7 +27,7 @@ const firebaseConfig = {
 /* ============================================================
    CONSTANTES GENERALES
    ============================================================ */
-const APP_VERSION = '2026.05.23.5'; // se sobreescribe al leer version.json
+const APP_VERSION = '2026.05.23.6'; // se sobreescribe al leer version.json
 const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
@@ -488,7 +488,7 @@ function irAMenuRestaurante() {
       key: 'pagos', titulo: 'Caja', desc: 'Cobrar y comprobantes',
       icono: ICONOS.caja,
       roles: ['SUPERUSUARIO','ADMINISTRADOR','CAJA'],
-      view: 'pendiente', placeholder: 'Caja y pagos'
+      view: 'caja'
     },
     {
       key: 'catalogo', titulo: 'Catálogo', desc: 'Productos y precios',
@@ -566,8 +566,10 @@ function irAMenuRestaurante() {
         Inventario.abrir();
      } else if (t.view === 'tomar-pedido') {
         Pedidos.abrir();
-      } else if (t.view === 'comanda') {
+    } else if (t.view === 'comanda') {
         Comanda.abrir();
+      } else if (t.view === 'caja') {
+        Caja.abrir();
       } else {
         showView(t.view);
       }
@@ -596,6 +598,7 @@ document.addEventListener('click', (e) => {
     const dest = t.dataset.go;
     // Si veníamos de Comanda, desenganchar listener + cronómetro
     if (typeof Comanda !== 'undefined') Comanda.desenganchar();
+    if (typeof Caja    !== 'undefined') Caja.desenganchar();
     if (dest === 'inicio') irAInicio();
     else if (dest === 'restaurante') irAMenuRestaurante();
     else showView(dest);
@@ -1971,6 +1974,17 @@ const Pedidos = {
     } else {
       descRow.classList.add('hidden');
     }
+    // Botón "Pedir cuenta": visible cuando el pedido está SERVIDO o PARCIAL,
+    // oculto si ya está PIDIENDO_CUENTA o aún hay ítems en cocina.
+    const btnCuenta = $('#pd-btn-cuenta');
+    if (btnCuenta) {
+      const est = String(meta.estado || '').toUpperCase();
+      const puedePedir = ['SERVIDO','PARCIAL_SERVIDO'].indexOf(est) >= 0;
+      const yaPedida   = est === 'PIDIENDO_CUENTA';
+      btnCuenta.classList.toggle('hidden', !(puedePedir || yaPedida));
+      btnCuenta.disabled = yaPedida;
+      btnCuenta.textContent = yaPedida ? '💰 Cuenta pedida' : '💰 Pedir cuenta';
+    }
   },
 
   labelEstado(estado) {
@@ -2443,13 +2457,44 @@ async marcarServido(itemId) {
       });
       sBtn._bound = true;
     }
-    if (sInp && !sInp._bound) {
+if (sInp && !sInp._bound) {
       let t = null;
       sInp.addEventListener('input', () => {
         clearTimeout(t);
         t = setTimeout(() => { this.filtroCat = sInp.value; this.renderCatalogo(); }, 180);
       });
       sInp._bound = true;
+    }
+    const btnC = $('#pd-btn-cuenta');
+    if (btnC && !btnC._bound) {
+      btnC.addEventListener('click', () => this.pedirCuenta());
+      btnC._bound = true;
+    }
+  },
+
+  async pedirCuenta() {
+    if (!this.pedidoActual) return;
+    const meta = this.pedidoActual.meta || {};
+    if (String(meta.estado).toUpperCase() === 'PIDIENDO_CUENTA') return;
+
+    const ok = await confirmar('Pedir cuenta',
+      `¿Notificar a caja que la mesa <b>#${meta.mesaNumero}</b> pide la cuenta por <b>${fmtPesos(meta.total)}</b>?`,
+      'Sí, pedir');
+    if (!ok) return;
+
+    // Optimista: actualizar UI antes de la respuesta
+    const estadoPrev = meta.estado;
+    meta.estado = 'PIDIENDO_CUENTA';
+    this.renderDetalle();
+    playSoundOnce(SOUNDS.pedido);
+
+    try {
+      await apiPost('pedirCuenta', withUser({ pedidoId: this.pedidoActual.id }));
+      Toast && Toast.fire({ icon: 'success', title: 'Caja notificada' });
+    } catch (e) {
+      meta.estado = estadoPrev;
+      this.renderDetalle();
+      alertErr('Error', e.message);
     }
   }
 };
@@ -2681,6 +2726,372 @@ const Comanda = {
 };
 
 /* ============================================================
+   ============================================================
+   FASE 3C — CAJA
+   Lista en vivo de pedidos por cobrar + modal de cobro
+   ============================================================
+   ============================================================ */
+const Caja = {
+  pedidos: {},        // { pedidoId: {mesaNumero, total, ...} }
+  config: null,       // CAJA_DESCUENTO_MAX_PCT, etc.
+  _ref: null,
+  _tickInterval: null,
+
+  async abrir() {
+    showView('caja');
+    await this.cargarInicial();
+    await this.engancharRTDB();
+    this.startTicker();
+  },
+
+  async cargarInicial() {
+    startLoading();
+    try {
+      // Config (descuento máximo, etc.) — usa getCatalogo no, mejor un endpoint
+      // dedicado o leemos de CONFIGURACION. Por simplicidad, hardcodeamos un
+      // tope sensato y luego refinamos si Oscar quiere.
+      this.config = { descuentoMaxPct: 20 };
+      await apiPost('sincronizarVistaCaja', withUser({}));
+    } catch (e) {
+      alertErr('Error al cargar caja', e.message);
+    } finally {
+      stopLoading();
+    }
+  },
+
+  async engancharRTDB() {
+    if (this._ref) return;
+    const fb = await getFirebase();
+    if (!fb) return;
+    this._ref = fb.database()
+      .ref('/negocios/' + NEGOCIO_RESTAURANTE_ID + '/caja/porCobrar');
+    this._ref.on('value', (snap) => {
+      this.pedidos = snap.val() || {};
+      this.render();
+    }, (err) => {
+      console.error('RTDB listener caja:', err);
+    });
+  },
+
+  startTicker() {
+    if (this._tickInterval) return;
+    this._tickInterval = setInterval(() => this.tickEsperas(), 1000);
+  },
+
+  desenganchar() {
+    if (this._ref) { this._ref.off(); this._ref = null; }
+    if (this._tickInterval) { clearInterval(this._tickInterval); this._tickInterval = null; }
+  },
+
+  render() {
+    const cont = $('#caja-content');
+    if (!cont) return;
+
+    const list = Object.entries(this.pedidos)
+      .map(([id, p]) => ({ id, ...p }))
+      .sort((a, b) => {
+        // Primero los que pidieron cuenta, ordenados por fecha
+        const aPide = a.pidiendoCuenta ? 0 : 1;
+        const bPide = b.pidiendoCuenta ? 0 : 1;
+        if (aPide !== bPide) return aPide - bPide;
+        return String(a.pidiendoCuentaDesde || a.fechaApertura)
+          .localeCompare(String(b.pidiendoCuentaDesde || b.fechaApertura));
+      });
+
+    const conCuenta = list.filter(p => p.pidiendoCuenta).length;
+    $('#caja-subtitle').textContent = list.length
+      ? `${list.length} pedido${list.length === 1 ? '' : 's'} por cobrar` +
+        (conCuenta ? ` · ${conCuenta} pidiendo cuenta` : '')
+      : 'Sin pedidos por cobrar';
+
+    if (!list.length) {
+      cont.innerHTML = `
+        <div class="card text-center" style="margin-top:32px;">
+          <div style="font-size:3rem; margin-bottom:8px;">💵</div>
+          <h3>Todo cobrado</h3>
+          <p class="muted">No hay pedidos pendientes de pago.</p>
+        </div>`;
+      return;
+    }
+
+    cont.innerHTML = `<div class="caja-list">${list.map(p => this.renderTarjeta(p)).join('')}</div>`;
+
+    $$('[data-cobrar]', cont).forEach(b => {
+      b.addEventListener('click', () => this.abrirModalCobro(b.dataset.cobrar));
+    });
+  },
+
+  renderTarjeta(p) {
+    const pidiendo = p.pidiendoCuenta;
+    const cls = pidiendo ? 'caja-card--alerta' : '';
+    const espera = pidiendo && p.pidiendoCuentaDesde
+      ? `<div class="caja-card__espera" data-espera-from="${p.pidiendoCuentaDesde}">—</div>`
+      : '';
+    const cliente = p.clienteNombre
+      ? `<div class="caja-card__cliente">${escapeHtml(p.clienteNombre)}</div>`
+      : '';
+    return `
+      <article class="caja-card ${cls}">
+        ${pidiendo ? '<span class="caja-card__badge">💰 Pide cuenta</span>' : ''}
+        <div class="caja-card__head">
+          <div class="caja-card__mesa">Mesa <b>${p.mesaNumero || '?'}</b></div>
+          ${espera}
+        </div>
+        <div class="caja-card__body">
+          <div class="caja-card__mesero">Mesero: <b>${escapeHtml(String(p.meseroNombre || '').split(' ')[0])}</b></div>
+          ${cliente}
+        </div>
+        <div class="caja-card__foot">
+          <div class="caja-card__total">
+            <span class="caja-card__total-lbl">Total</span>
+            <span class="caja-card__total-val">${fmtPesos(p.total)}</span>
+          </div>
+          <button class="btn btn-success" data-cobrar="${p.id}">
+            Cobrar
+          </button>
+        </div>
+      </article>
+    `;
+  },
+
+  tickEsperas() {
+    const view = $('#view-caja');
+    if (!view || !view.classList.contains('active')) return;
+    const now = Date.now();
+    $$('[data-espera-from]', view).forEach(el => {
+      const iso = el.dataset.esperaFrom;
+      const ts = Date.parse(iso.replace(' ', 'T'));
+      if (isNaN(ts)) { el.textContent = '—'; return; }
+      const secs = Math.max(0, Math.floor((now - ts) / 1000));
+      const m = Math.floor(secs / 60);
+      const s = secs % 60;
+      el.textContent = '⏱ ' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+      el.classList.toggle('is-warn', m >= 3 && m < 7);
+      el.classList.toggle('is-late', m >= 7);
+    });
+  },
+
+  /* ────────────────────────────────────────────
+     MODAL DE COBRO
+     ──────────────────────────────────────────── */
+  async abrirModalCobro(pedidoId) {
+    const p = this.pedidos[pedidoId];
+    if (!p) return;
+    // Estado interno del modal
+    const st = {
+      pedidoId,
+      subtotal:       Number(p.subtotal) || 0,
+      descuentoPct:   0,
+      descuentoValor: 0,
+      total:          Number(p.total)    || 0,
+      metodo:         'EFECTIVO',
+      montoEfectivo:  0,
+      montoTransfer:  0,
+      comprobanteB64: null,
+      comprobanteFn:  null
+    };
+    st.descuentoMaxPct = this.config.descuentoMaxPct;
+
+    const self = this;
+    Swal.fire({
+      title: `Cobrar mesa ${p.mesaNumero}`,
+      width: 560,
+      html: this.htmlModalCobro(p, st),
+      showCancelButton: true,
+      confirmButtonText: 'Cobrar y cerrar',
+      cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      focusConfirm: false,
+      didOpen: () => self.bindModalCobro(p, st),
+      preConfirm: () => self.validarCobro(p, st)
+    }).then(async (res) => {
+      if (!res.isConfirmed) return;
+      await self.ejecutarCobro(p, st, res.value);
+    });
+  },
+
+  htmlModalCobro(p, st) {
+    return `
+      <div class="cobro">
+        <div class="cobro__totales">
+          <div class="cobro__row">
+            <span>Subtotal</span>
+            <span id="cb-subtotal">${fmtPesos(st.subtotal)}</span>
+          </div>
+          <div class="cobro__row cobro__row--desc">
+            <label for="cb-desc">Descuento %</label>
+            <input type="number" id="cb-desc" min="0" max="${st.descuentoMaxPct}" step="1" value="0" />
+            <span id="cb-desc-val">$ 0</span>
+          </div>
+          <div class="cobro__row cobro__row--total">
+            <span>TOTAL</span>
+            <span id="cb-total">${fmtPesos(st.total)}</span>
+          </div>
+        </div>
+
+        <label>Método de pago</label>
+        <div class="cobro__metodos">
+          <button type="button" class="cobro__metodo is-active" data-metodo="EFECTIVO">
+            💵 Efectivo
+          </button>
+          <button type="button" class="cobro__metodo" data-metodo="TRANSFERENCIA">
+            📱 Transferencia
+          </button>
+          <button type="button" class="cobro__metodo" data-metodo="MIXTO">
+            🔀 Mixto
+          </button>
+        </div>
+
+        <div id="cb-mixto-row" class="hidden">
+          <label>Efectivo</label>
+          <input type="number" id="cb-monto-ef" min="0" step="100" placeholder="0" />
+          <label>Transferencia</label>
+          <input type="number" id="cb-monto-tr" min="0" step="100" placeholder="0" />
+        </div>
+
+        <div id="cb-comprobante-row" class="hidden">
+          <label>Comprobante de transferencia</label>
+          <label class="cobro__file-btn">
+            <span id="cb-file-name">📎 Adjuntar imagen</span>
+            <input type="file" id="cb-comprobante" accept="image/*" hidden />
+          </label>
+        </div>
+      </div>
+    `;
+  },
+
+  bindModalCobro(p, st) {
+    const self = this;
+    const upd = () => {
+      $('#cb-subtotal').textContent  = fmtPesos(st.subtotal);
+      $('#cb-desc-val').textContent  = '-' + fmtPesos(st.descuentoValor);
+      $('#cb-total').textContent     = fmtPesos(st.total);
+    };
+
+    // Descuento
+    $('#cb-desc').addEventListener('input', (e) => {
+      let pct = Number(e.target.value) || 0;
+      if (pct < 0) pct = 0;
+      const tope = st.descuentoMaxPct;
+      const esSuperAdmin = rolEs('SUPERUSUARIO', 'ADMINISTRADOR');
+      if (!esSuperAdmin && pct > tope) {
+        pct = tope;
+        e.target.value = pct;
+        Toast && Toast.fire({ icon: 'warning', title: `Máximo ${tope}%` });
+      }
+      st.descuentoPct   = pct;
+      st.descuentoValor = Math.round(st.subtotal * pct / 100);
+      st.total          = st.subtotal - st.descuentoValor;
+      upd();
+    });
+
+    // Botones de método
+    $$('.cobro__metodo').forEach(b => {
+      b.addEventListener('click', () => {
+        $$('.cobro__metodo').forEach(x => x.classList.remove('is-active'));
+        b.classList.add('is-active');
+        st.metodo = b.dataset.metodo;
+        $('#cb-mixto-row').classList.toggle('hidden', st.metodo !== 'MIXTO');
+        $('#cb-comprobante-row').classList.toggle('hidden',
+          st.metodo !== 'TRANSFERENCIA' && st.metodo !== 'MIXTO');
+      });
+    });
+
+    // Comprobante
+    $('#cb-comprobante').addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      if (file.size > 4 * 1024 * 1024) {
+        alertWarn('Imagen muy grande', 'Máximo 4 MB.');
+        e.target.value = '';
+        return;
+      }
+      try {
+        st.comprobanteB64 = await fileToBase64(file);
+        st.comprobanteFn  = file.name;
+        $('#cb-file-name').textContent = '✓ ' + file.name;
+      } catch (err) { alertErr('Error', err.message); }
+    });
+  },
+
+  validarCobro(p, st) {
+    const tope = st.descuentoMaxPct;
+    const esSuperAdmin = rolEs('SUPERUSUARIO', 'ADMINISTRADOR');
+    if (!esSuperAdmin && st.descuentoPct > tope) {
+      Swal.showValidationMessage(`Descuento máximo ${tope}%`);
+      return false;
+    }
+    let pagos = [];
+    if (st.metodo === 'EFECTIVO') {
+      pagos.push({ metodo: 'EFECTIVO', monto: st.total });
+    } else if (st.metodo === 'TRANSFERENCIA') {
+      if (!st.comprobanteB64) {
+        Swal.showValidationMessage('Sube el comprobante de transferencia');
+        return false;
+      }
+      pagos.push({ metodo: 'TRANSFERENCIA', monto: st.total });
+    } else if (st.metodo === 'MIXTO') {
+      const ef = Number($('#cb-monto-ef').value) || 0;
+      const tr = Number($('#cb-monto-tr').value) || 0;
+      if (ef <= 0 || tr <= 0) {
+        Swal.showValidationMessage('Ambos montos deben ser mayores a 0');
+        return false;
+      }
+      if (Math.abs(ef + tr - st.total) > 1) {
+        Swal.showValidationMessage(`La suma (${fmtPesos(ef + tr)}) no coincide con el total (${fmtPesos(st.total)})`);
+        return false;
+      }
+      if (!st.comprobanteB64) {
+        Swal.showValidationMessage('Sube el comprobante de transferencia');
+        return false;
+      }
+      pagos.push({ metodo: 'EFECTIVO',      monto: ef });
+      pagos.push({ metodo: 'TRANSFERENCIA', monto: tr });
+    }
+    return {
+      pagos,
+      descuentoPct:   st.descuentoPct,
+      descuentoValor: st.descuentoValor,
+      total:          st.total,
+      comprobanteB64: st.comprobanteB64,
+      comprobanteFn:  st.comprobanteFn
+    };
+  },
+
+  async ejecutarCobro(p, st, datos) {
+    startLoading();
+    try {
+      let comprobanteUrl = null;
+      if (datos.comprobanteB64) {
+        const up = await apiPost('subirComprobante', withUser({
+          pedidoId:  p.id || st.pedidoId,
+          filename:  datos.comprobanteFn,
+          base64:    datos.comprobanteB64
+        }));
+        comprobanteUrl = up.url || up.URL || null;
+      }
+      await apiPost('cobrarPedido', withUser({
+        pedidoId:       st.pedidoId,
+        descuentoPct:   datos.descuentoPct,
+        descuentoValor: datos.descuentoValor,
+        total:          datos.total,
+        pagos:          datos.pagos,
+        comprobanteUrl
+      }));
+      stopLoading();
+      playSoundOnce(SOUNDS.caja);
+      Toast && Toast.fire({ icon: 'success', title: 'Pedido cobrado' });
+      // El listener RTDB borrará la tarjeta automáticamente
+    } catch (e) {
+      stopLoading();
+      alertErr('Error al cobrar', e.message);
+    }
+  },
+
+  setupListeners() { /* nada por ahora */ }
+};
+
+/* ============================================================
    INICIALIZACIÓN
    ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
@@ -2695,7 +3106,8 @@ window.addEventListener('DOMContentLoaded', () => {
   Catalogo.setupListeners();
   Mesas.setupListeners();
   Inventario.setupListeners();
-  // Fase 3
+ // Fase 3
   Pedidos.setupListeners();
-   Comanda.setupListeners();
+  Comanda.setupListeners();
+  Caja.setupListeners();
 });
