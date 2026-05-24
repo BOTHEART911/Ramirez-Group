@@ -1719,19 +1719,14 @@ const Pedidos = {
     await this.engancharRTDB();
   },
 
- async cargarInicial() {
+async cargarInicial() {
     startLoading();
     try {
-      // Fase 4: leer descuento máximo desde CONFIGURACION
-      let descMax = 10;
-      try {
-        const cfg = await apiGet('getConfig', {});
-        descMax = Number(cfg.CAJA_DESCUENTO_MAX_PCT) || 10;
-      } catch (_) { /* fallback al default */ }
-      this.config = { descuentoMaxPct: descMax };
-      await apiPost('sincronizarVistaCaja', withUser({}));
+      this.mesasConfig = await apiGet('listMesas');
+      await apiPost('sincronizarVistaPedidos', withUser({}));
+      this.render();
     } catch (e) {
-      alertErr('Error al cargar caja', e.message);
+      alertErr('Error al cargar mesas', e.message);
     } finally {
       stopLoading();
     }
@@ -2749,13 +2744,16 @@ const Caja = {
     this.startTicker();
   },
 
-  async cargarInicial() {
+async cargarInicial() {
     startLoading();
     try {
-      // Config (descuento máximo, etc.) — usa getCatalogo no, mejor un endpoint
-      // dedicado o leemos de CONFIGURACION. Por simplicidad, hardcodeamos un
-      // tope sensato y luego refinamos si Oscar quiere.
-      this.config = { descuentoMaxPct: 20 };
+      // Fase 4: leer descuento máximo desde CONFIGURACION
+      let descMax = 10;
+      try {
+        const cfg = await apiGet('getConfig', {});
+        descMax = Number(cfg.CAJA_DESCUENTO_MAX_PCT) || 10;
+      } catch (_) { /* fallback al default */ }
+      this.config = { descuentoMaxPct: descMax };
       await apiPost('sincronizarVistaCaja', withUser({}));
     } catch (e) {
       alertErr('Error al cargar caja', e.message);
