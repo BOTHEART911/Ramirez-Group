@@ -3023,13 +3023,13 @@ const Caja = {
     }
     let pagos = [];
     if (st.metodo === 'EFECTIVO') {
-      pagos.push({ metodo: 'EFECTIVO', monto: st.total });
+      pagos.push({ metodo: 'EFECTIVO', valor: st.total });
     } else if (st.metodo === 'TRANSFERENCIA') {
       if (!st.comprobanteB64) {
         Swal.showValidationMessage('Sube el comprobante de transferencia');
         return false;
       }
-      pagos.push({ metodo: 'TRANSFERENCIA', monto: st.total });
+      pagos.push({ metodo: 'TRANSFERENCIA', valor: st.total, comprobanteUrl: null });
     } else if (st.metodo === 'MIXTO') {
       const ef = Number($('#cb-monto-ef').value) || 0;
       const tr = Number($('#cb-monto-tr').value) || 0;
@@ -3045,10 +3045,10 @@ const Caja = {
         Swal.showValidationMessage('Sube el comprobante de transferencia');
         return false;
       }
-      pagos.push({ metodo: 'EFECTIVO',      monto: ef });
-      pagos.push({ metodo: 'TRANSFERENCIA', monto: tr });
+      pagos.push({ metodo: 'EFECTIVO',      valor: ef });
+      pagos.push({ metodo: 'TRANSFERENCIA', valor: tr, comprobanteUrl: null });
     }
-    return {
+     return {
       pagos,
       descuentoPct:   st.descuentoPct,
       descuentoValor: st.descuentoValor,
@@ -3069,16 +3069,19 @@ const Caja = {
           base64:    datos.comprobanteB64
         }));
         comprobanteUrl = up.url || up.URL || null;
+        // Asignar la URL al pago de transferencia
+        datos.pagos.forEach(pg => {
+          if (pg.metodo === 'TRANSFERENCIA') pg.comprobanteUrl = comprobanteUrl;
+        });
       }
       await apiPost('cobrarPedido', withUser({
         pedidoId:       st.pedidoId,
         descuentoPct:   datos.descuentoPct,
         descuentoValor: datos.descuentoValor,
         total:          datos.total,
-        pagos:          datos.pagos,
-        comprobanteUrl
+        pagos:          datos.pagos
       }));
-      stopLoading();
+       stopLoading();
       playSoundOnce(SOUNDS.caja);
       Toast && Toast.fire({ icon: 'success', title: 'Pedido cobrado' });
       // El listener RTDB borrará la tarjeta automáticamente
