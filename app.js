@@ -2896,7 +2896,10 @@ async cargarInicial() {
       esGenerico:        true,
       clienteNombre:     '',
       clienteTelefono:   '',
-      clienteIdExistente: null   // se llena si el lookup encuentra match
+      clienteIdExistente: null,  // se llena si el lookup encuentra match
+      // Fase 4 — ticket bajo demanda
+      ticketUrl:         null,
+      ticketGenerando:   false
     };
     st.descuentoMaxPct = this.config.descuentoMaxPct;
 
