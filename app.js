@@ -27,7 +27,7 @@ const firebaseConfig = {
 /* ============================================================
    CONSTANTES GENERALES
    ============================================================ */
-const APP_VERSION = '2026.05.23.6'; // se sobreescribe al leer version.json
+const APP_VERSION = '2026.05.24.1'; // se sobreescribe al leer version.json
 const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
@@ -1719,14 +1719,19 @@ const Pedidos = {
     await this.engancharRTDB();
   },
 
-  async cargarInicial() {
+ async cargarInicial() {
     startLoading();
     try {
-      this.mesasConfig = await apiGet('listMesas');
-      await apiPost('sincronizarVistaPedidos', withUser({}));
-      this.render();
+      // Fase 4: leer descuento máximo desde CONFIGURACION
+      let descMax = 10;
+      try {
+        const cfg = await apiGet('getConfig', {});
+        descMax = Number(cfg.CAJA_DESCUENTO_MAX_PCT) || 10;
+      } catch (_) { /* fallback al default */ }
+      this.config = { descuentoMaxPct: descMax };
+      await apiPost('sincronizarVistaCaja', withUser({}));
     } catch (e) {
-      alertErr('Error al cargar mesas', e.message);
+      alertErr('Error al cargar caja', e.message);
     } finally {
       stopLoading();
     }
@@ -2877,7 +2882,7 @@ const Caja = {
   async abrirModalCobro(pedidoId) {
     const p = this.pedidos[pedidoId];
     if (!p) return;
-    // Estado interno del modal
+// Estado interno del modal
     const st = {
       pedidoId,
       subtotal:       Number(p.subtotal) || 0,
@@ -2888,7 +2893,12 @@ const Caja = {
       montoEfectivo:  0,
       montoTransfer:  0,
       comprobanteB64: null,
-      comprobanteFn:  null
+      comprobanteFn:  null,
+      // Fase 4 — cliente
+      esGenerico:        true,
+      clienteNombre:     '',
+      clienteTelefono:   '',
+      clienteIdExistente: null   // se llena si el lookup encuentra match
     };
     st.descuentoMaxPct = this.config.descuentoMaxPct;
 
@@ -2910,9 +2920,31 @@ const Caja = {
     });
   },
 
-  htmlModalCobro(p, st) {
+ htmlModalCobro(p, st) {
     return `
       <div class="cobro">
+
+        <!-- Fase 4 — Cliente -->
+        <div class="cobro__cliente">
+          <label class="cobro__toggle">
+            <input type="checkbox" id="cb-generico" checked />
+            <span class="cobro__toggle-lbl">👤 Cliente general (sin identificar)</span>
+          </label>
+          <div id="cb-cliente-fields" class="cobro__cliente-fields hidden">
+            <label>Nombre</label>
+            <input type="text" id="cb-cli-nombre" placeholder="Nombre del cliente" autocomplete="off" />
+            <label>WhatsApp (10 dígitos, debe iniciar en 3)</label>
+            <div class="cobro__tel-row">
+              <input type="tel" id="cb-cli-tel" maxlength="10" inputmode="numeric"
+                     placeholder="3001234567" autocomplete="off" />
+              <span id="cb-cli-status" class="cobro__cli-status"></span>
+            </div>
+            <p class="muted" style="font-size:0.74rem; margin-top:4px;">
+              📱 Se enviará el ticket por WhatsApp al cerrar la cuenta.
+            </p>
+          </div>
+        </div>
+
         <div class="cobro__totales">
           <div class="cobro__row">
             <span>Subtotal</span>
@@ -2960,13 +2992,87 @@ const Caja = {
     `;
   },
 
-  bindModalCobro(p, st) {
+ bindModalCobro(p, st) {
     const self = this;
     const upd = () => {
       $('#cb-subtotal').textContent  = fmtPesos(st.subtotal);
       $('#cb-desc-val').textContent  = '-' + fmtPesos(st.descuentoValor);
       $('#cb-total').textContent     = fmtPesos(st.total);
     };
+
+    // Fase 4 — Toggle Cliente general
+    const chkGen      = $('#cb-generico');
+    const fieldsCli   = $('#cb-cliente-fields');
+    const inpNombre   = $('#cb-cli-nombre');
+    const inpTel      = $('#cb-cli-tel');
+    const statusCli   = $('#cb-cli-status');
+
+    chkGen.addEventListener('change', () => {
+      st.esGenerico = chkGen.checked;
+      fieldsCli.classList.toggle('hidden', st.esGenerico);
+      if (st.esGenerico) {
+        st.clienteNombre = '';
+        st.clienteTelefono = '';
+        st.clienteIdExistente = null;
+        statusCli.textContent = '';
+        statusCli.className = 'cobro__cli-status';
+        inpNombre.value = '';
+        inpTel.value = '';
+      }
+    });
+
+    inpNombre.addEventListener('input', () => {
+      st.clienteNombre = inpNombre.value.trim();
+    });
+
+    // Lookup por teléfono con debounce
+    let lookupT = null;
+    inpTel.addEventListener('input', () => {
+      // Solo permitir dígitos
+      const v = inpTel.value.replace(/\D/g, '').substring(0, 10);
+      if (v !== inpTel.value) inpTel.value = v;
+      st.clienteTelefono = v;
+      st.clienteIdExistente = null;
+
+      // Estado visual del campo
+      if (v.length === 0) {
+        statusCli.textContent = '';
+        statusCli.className = 'cobro__cli-status';
+      } else if (!/^3\d{0,9}$/.test(v)) {
+        statusCli.textContent = '⚠️';
+        statusCli.className = 'cobro__cli-status is-err';
+      } else if (v.length < 10) {
+        statusCli.textContent = '...';
+        statusCli.className = 'cobro__cli-status is-loading';
+      }
+
+      clearTimeout(lookupT);
+      if (v.length !== 10 || !/^3\d{9}$/.test(v)) return;
+
+      lookupT = setTimeout(async () => {
+        statusCli.textContent = '🔎';
+        statusCli.className = 'cobro__cli-status is-loading';
+        try {
+          const r = await apiGet('buscarCliente', { telefono: v });
+          if (r && r.encontrado) {
+            st.clienteIdExistente = r.id;
+            if (!inpNombre.value.trim()) {
+              inpNombre.value = r.nombre;
+              st.clienteNombre = r.nombre;
+            }
+            statusCli.textContent = '✓';
+            statusCli.className = 'cobro__cli-status is-ok';
+          } else {
+            statusCli.textContent = '+';
+            statusCli.className = 'cobro__cli-status is-new';
+            statusCli.title = 'Cliente nuevo';
+          }
+        } catch (e) {
+          statusCli.textContent = '⚠';
+          statusCli.className = 'cobro__cli-status is-err';
+        }
+      }, 400);
+    });
 
     // Descuento
     $('#cb-desc').addEventListener('input', (e) => {
@@ -3014,12 +3120,25 @@ const Caja = {
     });
   },
 
-  validarCobro(p, st) {
+ validarCobro(p, st) {
     const tope = st.descuentoMaxPct;
     const esSuperAdmin = rolEs('SUPERUSUARIO', 'ADMINISTRADOR');
     if (!esSuperAdmin && st.descuentoPct > tope) {
       Swal.showValidationMessage(`Descuento máximo ${tope}%`);
       return false;
+    }
+    // Fase 4 — validar cliente si NO es genérico
+    if (!st.esGenerico) {
+      const nombre = (st.clienteNombre || '').trim();
+      const tel    = (st.clienteTelefono || '').trim();
+      if (!nombre) {
+        Swal.showValidationMessage('Ingresa el nombre del cliente');
+        return false;
+      }
+      if (!/^3\d{9}$/.test(tel)) {
+        Swal.showValidationMessage('WhatsApp debe ser un celular válido (10 dígitos, inicia en 3)');
+        return false;
+      }
     }
     let pagos = [];
     if (st.metodo === 'EFECTIVO') {
@@ -3048,19 +3167,33 @@ const Caja = {
       pagos.push({ metodo: 'EFECTIVO',      valor: ef });
       pagos.push({ metodo: 'TRANSFERENCIA', valor: tr, comprobanteUrl: null });
     }
-     return {
+    return {
       pagos,
       descuentoPct:   st.descuentoPct,
       descuentoValor: st.descuentoValor,
       total:          st.total,
       comprobanteB64: st.comprobanteB64,
-      comprobanteFn:  st.comprobanteFn
+      comprobanteFn:  st.comprobanteFn,
+      // Fase 4 — cliente
+      esGenerico:       st.esGenerico,
+      clienteNombre:    st.clienteNombre,
+      clienteTelefono:  st.clienteTelefono
     };
   },
 
   async ejecutarCobro(p, st, datos) {
     startLoading();
     try {
+      // Fase 4 — Asignar cliente al pedido antes de cobrar
+      await apiPost('asignarClientePedido', withUser({
+        pedidoId:   st.pedidoId,
+        esGenerico: !!datos.esGenerico,
+        cliente: datos.esGenerico ? null : {
+          nombre:   datos.clienteNombre,
+          telefono: datos.clienteTelefono
+        }
+      }));
+
       let comprobanteUrl = null;
       if (datos.comprobanteB64) {
         const up = await apiPost('subirComprobante', withUser({
@@ -3081,9 +3214,12 @@ const Caja = {
         total:          datos.total,
         pagos:          datos.pagos
       }));
-       stopLoading();
+      stopLoading();
       playSoundOnce(SOUNDS.caja);
-      Toast && Toast.fire({ icon: 'success', title: 'Pedido cobrado' });
+      const tituloOk = datos.esGenerico
+        ? 'Pedido cobrado'
+        : 'Pedido cobrado · 📱 Ticket enviado por WhatsApp';
+      Toast && Toast.fire({ icon: 'success', title: tituloOk });
       // El listener RTDB borrará la tarjeta automáticamente
     } catch (e) {
       stopLoading();
