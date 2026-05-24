@@ -2770,6 +2770,10 @@ async cargarInicial() {
       .ref('/negocios/' + NEGOCIO_RESTAURANTE_ID + '/caja/porCobrar');
     this._ref.on('value', (snap) => {
       this.pedidos = snap.val() || {};
+      // Fase 4 — si hay un modal de cobro abierto, NO re-renderizamos la
+      // grilla detrás (rompería el modal de SweetAlert). Solo actualizamos
+      // los datos en memoria; al cerrar el modal se vuelve a pintar.
+      if (this._modalAbierto) return;
       this.render();
     }, (err) => {
       console.error('RTDB listener caja:', err);
@@ -2904,6 +2908,7 @@ async cargarInicial() {
     st.descuentoMaxPct = this.config.descuentoMaxPct;
 
     const self = this;
+    this._modalAbierto = true;
     Swal.fire({
       title: `Cobrar mesa ${p.mesaNumero}`,
       width: 560,
@@ -2916,6 +2921,9 @@ async cargarInicial() {
       didOpen: () => self.bindModalCobro(p, st),
       preConfirm: () => self.validarCobro(p, st)
     }).then(async (res) => {
+      self._modalAbierto = false;
+      // Repintar la grilla con los datos más frescos que llegaron mientras el modal estuvo abierto
+      self.render();
       if (!res.isConfirmed) return;
       await self.ejecutarCobro(p, st, res.value);
     });
