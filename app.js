@@ -3314,14 +3314,39 @@ bindModalCobro(p, st) {
       st.ticketGenerando = false;
       refresh();
 
-      playSoundOnce(SOUNDS.ok);
-      Toast && Toast.fire({ icon: 'success', title: 'Ticket creado · Se enviará al cobrar' });
+   playSoundOnce(SOUNDS.ok);
+      // Banner inline DENTRO del modal — no usar Toast/Swal porque cierran el modal padre
+      this._mostrarBannerTicket('ok', 'Ticket creado · Se enviará al cobrar');
     } catch (e) {
       st.ticketGenerando = false;
       refresh();
-      // Toast en vez de alertErr para no cerrar el modal de cobro
-      Toast && Toast.fire({ icon: 'error', title: 'No se pudo crear el ticket: ' + e.message, timer: 4500 });
+// Banner inline DENTRO del modal — no usar Toast/Swal porque cierran el modal padre
+      this._mostrarBannerTicket('err', 'No se pudo crear: ' + e.message);
     }
+  },
+
+  /**
+   * FASE 4 — Banner de feedback DENTRO del modal de cobro.
+   * No usa Swal/Toast porque SweetAlert v11 solo permite un popup activo,
+   * y abrir un Toast cerraría el modal padre. Esto es un div inyectado en
+   * el cuerpo del modal que se autoelimina a los 2.4s.
+   */
+  _mostrarBannerTicket(tipo, mensaje) {
+    const cont = document.querySelector('.swal2-html-container .cobro');
+    if (!cont) return;
+    // Quitar banner previo si existe
+    const prev = cont.querySelector('.cobro__banner-ticket');
+    if (prev) prev.remove();
+    // Crear nuevo banner
+    const banner = document.createElement('div');
+    banner.className = 'cobro__banner-ticket cobro__banner-ticket--' + tipo;
+    banner.innerHTML = (tipo === 'ok' ? '✓ ' : '⚠ ') + escapeHtml(mensaje);
+    cont.insertBefore(banner, cont.firstChild);
+    // Autoeliminar tras 2.4s con fade
+    setTimeout(() => {
+      banner.classList.add('is-fading');
+      setTimeout(() => banner.remove(), 300);
+    }, 2400);
   },
 
   setupListeners() { /* nada por ahora */ }
