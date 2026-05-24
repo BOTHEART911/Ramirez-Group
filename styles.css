@@ -2385,6 +2385,7 @@ textarea { resize: vertical; min-height: 80px; }
 .caja-card--alerta {
   border-color: var(--accent);
   background: linear-gradient(135deg, var(--accent-soft) 0%, var(--bg-card) 70%);
+  padding-top: 38px; /* Fase 4: deja espacio para el badge "PIDE CUENTA" */
 }
 .caja-card--alerta::before {
   content: '';
