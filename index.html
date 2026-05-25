@@ -466,6 +466,44 @@
   </section>
 
   <!-- ============================================================
+       VISTA USUARIOS  (Fase 5 / Bloque E)
+       ============================================================ -->
+  <section id="view-usuarios" class="view">
+    <header class="app-header">
+      <button class="app-header__back" data-go="restaurante" title="Volver">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"/>
+          <polyline points="12 19 5 12 12 5"/>
+        </svg>
+      </button>
+      <h1 class="app-header__title">Usuarios</h1>
+      <button id="usr-search-btn" class="app-header__icon" title="Buscar">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="7"/>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+      </button>
+    </header>
+    <div class="container">
+      <div id="usr-search-bar" class="search-bar hidden">
+        <input id="usr-search-input" type="search"
+               placeholder="Buscar por nombre, documento, teléfono o rol…" autocomplete="off" />
+      </div>
+      <p class="muted" id="usr-subtitle" style="margin-top:8px;">—</p>
+      <div id="usr-content" class="usr-list"></div>
+    </div>
+    <button id="usr-fab" class="fab" title="Nuevo usuario">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"/>
+        <line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+    </button>
+  </section>
+
+  <!-- ============================================================
        VISTAS PLACEHOLDER (Fases siguientes)
        ============================================================ -->
   <section id="view-pendiente" class="view">
