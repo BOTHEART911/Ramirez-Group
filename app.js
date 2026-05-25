@@ -2288,17 +2288,6 @@ abrirPedidoExistente(pedidoId, mesaId) {
         </div>
       `;
     }).join('');
-      return `
-        <div class="mp-grupo">
-          <div class="mp-grupo__head">
-            <strong>${escapeHtml(g.nombreGrupo || g.grupo)}</strong>
-            ${g.obligatorio ? `<span class="mp-tag mp-tag--oblig">Obligatorio</span>` : ''}
-            <span class="mp-tag">${isUnica ? 'Única' : 'Múltiple'}</span>
-          </div>
-          <div class="mp-opts">${opsHTML}</div>
-        </div>
-      `;
-    }).join('');
 
     const cantIni = (initial && initial.cantidad) ? Math.max(1, Number(initial.cantidad)) : 1;
     const notaIni = (initial && initial.descripcion) ? initial.descripcion : '';
