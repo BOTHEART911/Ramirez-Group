@@ -27,7 +27,7 @@ const firebaseConfig = {
 /* ============================================================
    CONSTANTES GENERALES
    ============================================================ */
-const APP_VERSION = '2026.05.23.6'; // se sobreescribe al leer version.json
+const APP_VERSION = '2026.05.25.1'; // se sobreescribe al leer version.json
 const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
@@ -508,11 +508,11 @@ function irAMenuRestaurante() {
       roles: ['SUPERUSUARIO','ADMINISTRADOR'],
       view: 'mesas'
     },
-    {
+ {
       key: 'anclaje', titulo: 'Anclaje del día', desc: 'Cierre diario',
       icono: ICONOS.luna,
-      roles: ['SUPERUSUARIO','CONTADOR'],
-      view: 'pendiente', placeholder: 'Anclaje del día'
+      roles: ['SUPERUSUARIO','ADMINISTRADOR','CONTADOR'],
+      view: 'anclaje'
     },
     {
       key: 'balances', titulo: 'Balances', desc: 'Reportes mensuales',
@@ -568,8 +568,10 @@ function irAMenuRestaurante() {
         Pedidos.abrir();
     } else if (t.view === 'comanda') {
         Comanda.abrir();
-      } else if (t.view === 'caja') {
+     } else if (t.view === 'caja') {
         Caja.abrir();
+      } else if (t.view === 'anclaje') {
+        Anclaje.abrir();
       } else {
         showView(t.view);
       }
@@ -599,6 +601,7 @@ document.addEventListener('click', (e) => {
     // Si veníamos de Comanda, desenganchar listener + cronómetro
     if (typeof Comanda !== 'undefined') Comanda.desenganchar();
     if (typeof Caja    !== 'undefined') Caja.desenganchar();
+    if (typeof Anclaje !== 'undefined') Anclaje.desenganchar();
     if (dest === 'inicio') irAInicio();
     else if (dest === 'restaurante') irAMenuRestaurante();
     else showView(dest);
@@ -3578,6 +3581,482 @@ bindModalCobro(p, st) {
 };
 
 /* ============================================================
+   ============================================================
+   FASE 5 / BLOQUE B — ANCLAJE DEL DÍA
+   Pantalla del cierre diario: resumen en vivo, declaración
+   de caja, anclaje + histórico. Auto-refresh cada 30s.
+   ============================================================
+   ============================================================ */
+const Anclaje = {
+  preview: null,
+  historico: [],
+  cargandoHistorico: false,
+  _refreshInterval: null,
+  _fechaInicial: null,
+
+  async abrir() {
+    showView('anclaje');
+    this._fechaInicial = this.fechaYyyyMmDdLocal();
+    this.renderHero();
+    this.pintarLoading();
+    await Promise.all([this.cargarPreview(), this.cargarHistorico()]);
+    this.render();
+    this.startAutoRefresh();
+  },
+
+  fechaYyyyMmDdLocal() {
+    const d = new Date();
+    return d.getFullYear() + '-' +
+           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+           String(d.getDate()).padStart(2, '0');
+  },
+
+  async cargarPreview() {
+    try { this.preview = await apiGet('previewAnclaje'); }
+    catch (e) { console.error('previewAnclaje:', e); this.preview = null; }
+  },
+
+  async cargarHistorico() {
+    if (this.cargandoHistorico) return;
+    this.cargandoHistorico = true;
+    try { this.historico = await apiGet('listAnclajes', { limit: 30 }); }
+    catch (e) { console.error('listAnclajes:', e); this.historico = []; }
+    finally { this.cargandoHistorico = false; }
+  },
+
+  pintarLoading() {
+    const cont = $('#anc-content');
+    if (cont) cont.innerHTML = `
+      <div class="anc-loading">
+        <div class="spinner">
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <p class="muted">Cargando datos del día…</p>
+      </div>`;
+    const foot = $('#anc-footer');
+    if (foot) foot.classList.add('hidden');
+  },
+
+  renderHero() {
+    const hoy = new Date();
+    let fechaStr = hoy.toLocaleDateString('es-CO', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+    });
+    fechaStr = fechaStr.charAt(0).toUpperCase() + fechaStr.slice(1);
+    const hero = $('#anc-hero');
+    if (hero) hero.innerHTML = `
+      <div class="anc-hero__label">Corte del día</div>
+      <h2 class="anc-hero__fecha">${escapeHtml(fechaStr)}</h2>
+      <p class="anc-hero__sub muted">Corte automático programado para las <b>10:00 PM</b> si no anclas antes.</p>
+    `;
+  },
+
+  render() {
+    this.renderHero();
+    if (!this.preview) {
+      const cont = $('#anc-content');
+      if (cont) cont.innerHTML = `
+        <div class="card text-center" style="margin-top:16px;">
+          <div style="font-size:2.4rem; opacity:0.4;">⚠️</div>
+          <h3>Error al cargar</h3>
+          <p class="muted">No pudimos obtener los datos del día. Revisa tu conexión.</p>
+          <button class="btn btn-ghost mt-md" id="anc-btn-retry">Reintentar</button>
+        </div>`;
+      $('#anc-btn-retry')?.addEventListener('click', () => this.abrir());
+      $('#anc-footer')?.classList.add('hidden');
+      return;
+    }
+    if (this.preview.yaAnclado)              this.renderEstadoAnclado();
+    else if (this.preview.pedidosAbiertos.length) this.renderEstadoBloqueado();
+    else                                     this.renderEstadoLimpio();
+    this.renderHistorico();
+  },
+
+  renderEstadoLimpio() {
+    const p = this.preview;
+    const cont = $('#anc-content');
+    cont.innerHTML = `
+      <div class="anc-card anc-card--resumen">
+        <h3 class="anc-card__title">Resumen del día</h3>
+        <div class="anc-row">
+          <span class="anc-row__lbl">Pedidos cobrados</span>
+          <span class="anc-row__val">${p.cantPedidos}</span>
+        </div>
+        <div class="anc-row">
+          <span class="anc-row__lbl">Total ventas</span>
+          <span class="anc-row__val">${fmtPesos(p.totalVentas)}</span>
+        </div>
+        ${p.totalDescuentos > 0 ? `
+          <div class="anc-row anc-row--desc">
+            <span class="anc-row__lbl">Descuentos</span>
+            <span class="anc-row__val">-${fmtPesos(p.totalDescuentos)}</span>
+          </div>` : ''}
+        <div class="anc-row anc-row--total">
+          <span class="anc-row__lbl">Total neto</span>
+          <span class="anc-row__val">${fmtPesos(p.totalNeto)}</span>
+        </div>
+      </div>
+
+      <div class="anc-card">
+        <h3 class="anc-card__title">Pagos del día — Sistema vs Declarado</h3>
+        ${this.renderBloquePago('Efectivo', '💵', 'ef', p.efectivoSistema)}
+        ${this.renderBloquePago('Transferencia', '📱', 'tr', p.transferSistema)}
+        <label for="anc-obs">Observación (opcional)</label>
+        <textarea id="anc-obs" maxlength="500"
+                  placeholder="Notas, novedades, justificación de diferencias…"></textarea>
+        <div class="anc-obs__counter"><span id="anc-obs-count">0</span> / 500</div>
+      </div>
+
+      ${(p.top3Productos || []).length ? `
+        <div class="anc-card">
+          <h3 class="anc-card__title">Top 3 productos del día</h3>
+          <ol class="anc-top3">
+            ${p.top3Productos.map((tp, i) => `
+              <li class="anc-top3__item">
+                <span class="anc-top3__rank">${i + 1}</span>
+                <span class="anc-top3__name">${escapeHtml(tp.nombre)}</span>
+                <span class="anc-top3__qty">${tp.cantidad}</span>
+              </li>
+            `).join('')}
+          </ol>
+        </div>` : ''}
+    `;
+
+    const inpEf = $('#anc-ef');
+    const inpTr = $('#anc-tr');
+    const recalc = () => {
+      const ef = Number(inpEf.value) || 0;
+      const tr = Number(inpTr.value) || 0;
+      this.pintarDiferencia('#anc-dif-ef', ef - p.efectivoSistema, p.efectivoSistema);
+      this.pintarDiferencia('#anc-dif-tr', tr - p.transferSistema, p.transferSistema);
+    };
+    inpEf.addEventListener('input', recalc);
+    inpTr.addEventListener('input', recalc);
+    recalc();
+
+    const obs = $('#anc-obs');
+    const cnt = $('#anc-obs-count');
+    obs.addEventListener('input', () => { cnt.textContent = obs.value.length; });
+
+    const foot = $('#anc-footer');
+    foot.classList.remove('hidden');
+    foot.innerHTML = `<button class="btn btn-success btn-lg btn-block" id="anc-btn-anclar">🌙 Anclar día</button>`;
+    $('#anc-btn-anclar').addEventListener('click', () => this.confirmarYAnclar());
+  },
+
+  renderBloquePago(titulo, icono, key, sistema) {
+    return `
+      <div class="anc-pago">
+        <div class="anc-pago__head">
+          <span class="anc-pago__icon">${icono}</span>
+          <span class="anc-pago__title">${titulo}</span>
+        </div>
+        <div class="anc-pago__body">
+          <div class="anc-pago__sis">
+            <span class="anc-pago__sublbl">Sistema</span>
+            <span class="anc-pago__sisval">${fmtPesos(sistema)}</span>
+          </div>
+          <div class="anc-pago__dec">
+            <label for="anc-${key}">Declarado</label>
+            <input id="anc-${key}" type="number" min="0" step="1000" placeholder="0" inputmode="numeric" />
+          </div>
+          <div class="anc-pago__dif" id="anc-dif-${key}">
+            <span class="anc-pago__sublbl">Diferencia</span>
+            <span class="anc-pago__difval">$ 0</span>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  pintarDiferencia(sel, dif, sistema) {
+    const cont = $(sel);
+    if (!cont) return;
+    const val = cont.querySelector('.anc-pago__difval');
+    const abs = Math.abs(dif);
+    let cls = 'anc-pago__difval--ok';
+    if (abs > 0) {
+      const tope = (sistema || 0) * 0.05;
+      cls = abs > tope ? 'anc-pago__difval--err' : 'anc-pago__difval--warn';
+    }
+    val.className = 'anc-pago__difval ' + cls;
+    val.textContent = (dif > 0 ? '+' : dif < 0 ? '-' : '') + fmtPesos(abs);
+  },
+
+  renderEstadoBloqueado() {
+    const p = this.preview;
+    const cont = $('#anc-content');
+    const items = p.pedidosAbiertos.map(pe => `
+      <li class="anc-pendiente">
+        <span class="anc-pendiente__mesa">Mesa ${pe.mesaNumero}</span>
+        <span class="anc-pendiente__mesero">${escapeHtml(String(pe.meseroNombre || '?').split(' ')[0])}</span>
+        <span class="anc-pendiente__total">${fmtPesos(pe.total)}</span>
+      </li>`).join('');
+    cont.innerHTML = `
+      <div class="anc-card anc-card--warn">
+        <div class="anc-warn__icon">⚠️</div>
+        <h3>${p.pedidosAbiertos.length} pedido(s) abierto(s)</h3>
+        <p>Cierra y cobra todos los pedidos antes de anclar el día.</p>
+        <ul class="anc-pendientes">${items}</ul>
+        <button class="btn btn-ghost btn-block" id="anc-btn-refresh">🔄 Refrescar</button>
+      </div>`;
+    $('#anc-btn-refresh').addEventListener('click', () => this.refrescar(false));
+    $('#anc-footer').classList.add('hidden');
+  },
+
+  renderEstadoAnclado() {
+    const anc = this.preview.anclajePrevio;
+    const cont = $('#anc-content');
+    cont.innerHTML = `
+      <div class="anc-card anc-card--ok">
+        <div class="anc-ok__icon">✓</div>
+        <h3>Día anclado</h3>
+        <p class="anc-ok__sub">
+          ${escapeHtml(anc.fechaCorte)}<br>
+          por <b>${escapeHtml(anc.usuarioNombre)}</b> · ${escapeHtml(anc.rol)} · ${escapeHtml(anc.modo)}
+        </p>
+        <button class="btn btn-ghost mt-md" id="anc-btn-ver-detalle">Ver detalle del anclaje</button>
+      </div>`;
+    $('#anc-btn-ver-detalle').addEventListener('click', () => this.abrirDetalleAnclaje(anc.id));
+    $('#anc-footer').classList.add('hidden');
+  },
+
+  renderHistorico() {
+    const cont = $('#anc-historico');
+    if (!cont) return;
+    if (!this.historico.length) {
+      cont.innerHTML = `
+        <div class="anc-card">
+          <h3 class="anc-card__title">Histórico</h3>
+          <p class="muted text-center" style="margin-top:8px;">Aún no hay anclajes registrados.</p>
+        </div>`;
+      return;
+    }
+    cont.innerHTML = `
+      <div class="anc-card">
+        <h3 class="anc-card__title">Histórico (${this.historico.length})</h3>
+        <ul class="anc-hist-list">
+          ${this.historico.map(a => `
+            <li class="anc-hist-row" data-anc-hist="${a.id}">
+              <div class="anc-hist-row__head">
+                <span class="anc-hist-row__fecha">${escapeHtml(a.fechaCorte)}</span>
+                <span class="anc-hist-row__modo anc-hist-row__modo--${String(a.modo).toLowerCase()}">${escapeHtml(a.modo)}</span>
+              </div>
+              <div class="anc-hist-row__body">
+                <span class="anc-hist-row__user">${escapeHtml(String(a.usuarioNombre || '').split(' ')[0])}</span>
+                <span class="anc-hist-row__total">${fmtPesos(a.totalNeto)}</span>
+                <span class="anc-hist-row__peds">${a.cantPedidos} ped.</span>
+              </div>
+              ${(a.difEfectivo !== 0 || a.difTransfer !== 0) ? `
+                <div class="anc-hist-row__difs">
+                  ${a.difEfectivo !== 0 ? `<span class="anc-hist-row__dif">Ef: ${a.difEfectivo > 0 ? '+' : '-'}${fmtPesos(Math.abs(a.difEfectivo))}</span>` : ''}
+                  ${a.difTransfer !== 0 ? `<span class="anc-hist-row__dif">Tr: ${a.difTransfer > 0 ? '+' : '-'}${fmtPesos(Math.abs(a.difTransfer))}</span>` : ''}
+                </div>` : ''}
+            </li>`).join('')}
+        </ul>
+      </div>`;
+    $$('[data-anc-hist]', cont).forEach(el => {
+      el.addEventListener('click', () => this.abrirDetalleAnclaje(el.dataset.ancHist));
+    });
+  },
+
+  async confirmarYAnclar() {
+    const p = this.preview;
+    const ef = Number($('#anc-ef').value) || 0;
+    const tr = Number($('#anc-tr').value) || 0;
+    const observacion = $('#anc-obs').value.trim();
+    const difEf = ef - p.efectivoSistema;
+    const difTr = tr - p.transferSistema;
+    const hayDif = Math.abs(difEf) > 0 || Math.abs(difTr) > 0;
+
+    if (hayDif && !observacion) {
+      const ok = await confirmar(
+        'Diferencia sin observación',
+        `Hay diferencias (Ef: ${fmtPesos(Math.abs(difEf))}, Tr: ${fmtPesos(Math.abs(difTr))}) pero la observación está vacía. ¿Continuar?`,
+        'Continuar sin observación'
+      );
+      if (!ok) { $('#anc-obs').focus(); return; }
+    }
+
+    const html = `
+      <div class="anc-confirm">
+        <div class="anc-confirm__row"><span>Total neto</span><b>${fmtPesos(p.totalNeto)}</b></div>
+        <div class="anc-confirm__row"><span>Pedidos cobrados</span><b>${p.cantPedidos}</b></div>
+        <hr style="border:0;border-top:1px dashed var(--border);margin:10px 0;" />
+        <div class="anc-confirm__row"><span>Efectivo sistema</span><b>${fmtPesos(p.efectivoSistema)}</b></div>
+        <div class="anc-confirm__row"><span>Efectivo declarado</span><b>${fmtPesos(ef)}</b></div>
+        <div class="anc-confirm__row ${this._difCls(difEf, p.efectivoSistema)}"><span>Diferencia efectivo</span><b>${difEf > 0 ? '+' : difEf < 0 ? '-' : ''}${fmtPesos(Math.abs(difEf))}</b></div>
+        <hr style="border:0;border-top:1px dashed var(--border);margin:10px 0;" />
+        <div class="anc-confirm__row"><span>Transfer sistema</span><b>${fmtPesos(p.transferSistema)}</b></div>
+        <div class="anc-confirm__row"><span>Transfer declarado</span><b>${fmtPesos(tr)}</b></div>
+        <div class="anc-confirm__row ${this._difCls(difTr, p.transferSistema)}"><span>Diferencia transfer</span><b>${difTr > 0 ? '+' : difTr < 0 ? '-' : ''}${fmtPesos(Math.abs(difTr))}</b></div>
+        ${observacion ? `
+          <hr style="border:0;border-top:1px dashed var(--border);margin:10px 0;" />
+          <div class="anc-confirm__obs">📝 ${escapeHtml(observacion)}</div>` : ''}
+      </div>`;
+    const ok = await Swal.fire({
+      title: 'Confirmar anclaje', html, width: 480,
+      showCancelButton: true,
+      confirmButtonText: 'Sí, anclar día',
+      cancelButtonText: 'Revisar',
+      reverseButtons: true
+    }).then(r => r.isConfirmed);
+    if (!ok) return;
+
+    startLoading();
+    try {
+      await apiPost('anclarDia', withUser({
+        efectivoDeclarado: ef,
+        transferDeclarado: tr,
+        observacion
+      }));
+      stopLoading();
+      playSoundOnce(SOUNDS.ok);
+      Toast && Toast.fire({ icon: 'success', title: 'Día anclado' });
+      await Promise.all([this.cargarPreview(), this.cargarHistorico()]);
+      this.render();
+    } catch (e) {
+      stopLoading();
+      const msg = e.message || 'Error al anclar';
+      if (msg.indexOf('Ya se ancló') >= 0) {
+        await alertWarn('Ya estaba anclado',
+          'Alguien más ancló el día mientras llenabas el formulario. Refrescamos para mostrarte el estado actual.');
+        await this.refrescar(true);
+      } else if (msg.indexOf('pedido(s) abierto(s)') >= 0) {
+        await alertWarn('Hay pedidos abiertos',
+          'Se abrió un pedido nuevo justo antes del anclaje. Refrescamos para mostrártelo.');
+        await this.refrescar(true);
+      } else {
+        alertErr('Error', msg);
+      }
+    }
+  },
+
+  _difCls(dif, sistema) {
+    const abs = Math.abs(dif);
+    if (abs === 0) return 'anc-confirm__row--ok';
+    const tope = (sistema || 0) * 0.05;
+    return abs > tope ? 'anc-confirm__row--err' : 'anc-confirm__row--warn';
+  },
+
+  async abrirDetalleAnclaje(id) {
+    startLoading();
+    try {
+      const a = await apiGet('getAnclaje', { id });
+      stopLoading();
+      Swal.fire({
+        title: 'Detalle del anclaje',
+        html: `
+          <div class="anc-confirm">
+            <div class="anc-confirm__row"><span>ID</span><b>${escapeHtml(a.id)}</b></div>
+            <div class="anc-confirm__row"><span>Fecha corte</span><b>${escapeHtml(a.fechaCorte)}</b></div>
+            <div class="anc-confirm__row"><span>Ancló</span><b>${escapeHtml(a.usuarioNombre)} (${escapeHtml(a.rol)})</b></div>
+            <div class="anc-confirm__row"><span>Modo</span><b>${escapeHtml(a.modo)}</b></div>
+            <hr style="border:0;border-top:1px dashed var(--border);margin:10px 0;" />
+            <div class="anc-confirm__row"><span>Total ventas</span><b>${fmtPesos(a.totalVentas)}</b></div>
+            ${a.totalDescuentos > 0 ? `<div class="anc-confirm__row"><span>Descuentos</span><b>-${fmtPesos(a.totalDescuentos)}</b></div>` : ''}
+            <div class="anc-confirm__row anc-confirm__row--total"><span>Total neto</span><b>${fmtPesos(a.totalNeto)}</b></div>
+            <div class="anc-confirm__row"><span>Pedidos</span><b>${a.cantPedidos}</b></div>
+            <hr style="border:0;border-top:1px dashed var(--border);margin:10px 0;" />
+            <div class="anc-confirm__row"><span>Efectivo sistema</span><b>${fmtPesos(a.efectivoSistema)}</b></div>
+            <div class="anc-confirm__row"><span>Efectivo declarado</span><b>${fmtPesos(a.efectivoDeclarado)}</b></div>
+            <div class="anc-confirm__row ${this._difCls(a.difEfectivo, a.efectivoSistema)}"><span>Diferencia</span><b>${a.difEfectivo > 0 ? '+' : a.difEfectivo < 0 ? '-' : ''}${fmtPesos(Math.abs(a.difEfectivo))}</b></div>
+            <hr style="border:0;border-top:1px dashed var(--border);margin:10px 0;" />
+            <div class="anc-confirm__row"><span>Transfer sistema</span><b>${fmtPesos(a.transferSistema)}</b></div>
+            <div class="anc-confirm__row"><span>Transfer declarado</span><b>${fmtPesos(a.transferDeclarado)}</b></div>
+            <div class="anc-confirm__row ${this._difCls(a.difTransfer, a.transferSistema)}"><span>Diferencia</span><b>${a.difTransfer > 0 ? '+' : a.difTransfer < 0 ? '-' : ''}${fmtPesos(Math.abs(a.difTransfer))}</b></div>
+            ${a.observacion ? `
+              <hr style="border:0;border-top:1px dashed var(--border);margin:10px 0;" />
+              <div class="anc-confirm__obs">📝 ${escapeHtml(a.observacion)}</div>` : ''}
+            <hr style="border:0;border-top:1px dashed var(--border);margin:10px 0;" />
+            <div class="anc-confirm__row anc-confirm__row--muted">
+              <span>WhatsApp al dueño</span><b>${a.enviadoWa ? '✓ Enviado' : '— No enviado'}</b>
+            </div>
+          </div>`,
+        width: 520,
+        confirmButtonText: 'Cerrar'
+      });
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  async refrescar(silent) {
+    if (!silent) startLoading();
+    await this.cargarPreview();
+    if (!silent) stopLoading();
+    this.render();
+  },
+
+  _snapshotMacro() {
+    if (!this.preview) return 'error';
+    if (this.preview.yaAnclado) return 'anclado';
+    if (this.preview.pedidosAbiertos.length) {
+      return 'bloqueado:' + this.preview.pedidosAbiertos.length;
+    }
+    return [
+      'limpio',
+      this.preview.cantPedidos,
+      this.preview.totalVentas,
+      this.preview.totalDescuentos,
+      this.preview.efectivoSistema,
+      this.preview.transferSistema
+    ].join(':');
+  },
+
+  startAutoRefresh() {
+    this.stopAutoRefresh();
+    this._refreshInterval = setInterval(async () => {
+      // No tocar la UI si hay un modal de SweetAlert abierto
+      if (typeof Swal !== 'undefined' && Swal.isVisible && Swal.isVisible()) return;
+
+      // Cambio de día → recargar la vista por completo
+      const ahora = this.fechaYyyyMmDdLocal();
+      if (this._fechaInicial && ahora !== this._fechaInicial) {
+        console.log('Anclaje: cambió el día, recargando…');
+        location.reload();
+        return;
+      }
+
+      const prev = this._snapshotMacro();
+      await this.cargarPreview();
+      const next = this._snapshotMacro();
+      if (prev === next) return; // nada cambió, no repintar
+
+      // Preservar lo que el cajero tenía escrito en el formulario
+      const efVal  = $('#anc-ef')?.value;
+      const trVal  = $('#anc-tr')?.value;
+      const obsVal = $('#anc-obs')?.value;
+
+      this.render();
+
+      if (efVal !== undefined && $('#anc-ef'))  $('#anc-ef').value  = efVal;
+      if (trVal !== undefined && $('#anc-tr'))  $('#anc-tr').value  = trVal;
+      if (obsVal !== undefined && $('#anc-obs')) {
+        $('#anc-obs').value = obsVal;
+        const cnt = $('#anc-obs-count');
+        if (cnt) cnt.textContent = obsVal.length;
+      }
+      // Re-calcular diferencias con los inputs restaurados
+      $('#anc-ef')?.dispatchEvent(new Event('input'));
+    }, 30 * 1000);
+  },
+
+  stopAutoRefresh() {
+    if (this._refreshInterval) {
+      clearInterval(this._refreshInterval);
+      this._refreshInterval = null;
+    }
+  },
+
+  desenganchar() { this.stopAutoRefresh(); },
+
+  setupListeners() { /* nada por ahora */ }
+};
+
+/* ============================================================
    INICIALIZACIÓN
    ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
@@ -3592,8 +4071,10 @@ window.addEventListener('DOMContentLoaded', () => {
   Catalogo.setupListeners();
   Mesas.setupListeners();
   Inventario.setupListeners();
- // Fase 3
+// Fase 3
   Pedidos.setupListeners();
   Comanda.setupListeners();
   Caja.setupListeners();
+  // Fase 5
+  Anclaje.setupListeners();
 });
