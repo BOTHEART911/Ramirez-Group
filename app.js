@@ -27,7 +27,7 @@ const firebaseConfig = {
 /* ============================================================
    CONSTANTES GENERALES
    ============================================================ */
-const APP_VERSION = '2026.05.25.2'; // se sobreescribe al leer version.json
+const APP_VERSION = '2026.05.25.3'; // se sobreescribe al leer version.json
 const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
@@ -532,11 +532,11 @@ function irAMenuRestaurante() {
       roles: ['SUPERUSUARIO','CONTADOR'],
       view: 'pendiente', placeholder: 'Auditoría'
     },
-    {
+   {
       key: 'config', titulo: 'Configuración', desc: 'Ajustes del sistema',
       icono: ICONOS.impresora,
       roles: ['SUPERUSUARIO'],
-      view: 'pendiente', placeholder: 'Configuración'
+      view: 'configuracion'
     }
   ];
 
@@ -574,6 +574,8 @@ function irAMenuRestaurante() {
         Anclaje.abrir();
       } else if (t.view === 'usuarios') {
         Usuarios.abrir();
+      } else if (t.view === 'configuracion') {
+        Configuracion.abrir();
       } else {
         showView(t.view);
       }
@@ -4381,7 +4383,7 @@ const Usuarios = {
 
   desenganchar() { /* sin listeners persistentes */ },
 
-  setupListeners() {
+setupListeners() {
     const fab = $('#usr-fab');
     if (fab && !fab._bound) {
       fab.addEventListener('click', () => this.abrirModal(null));
@@ -4410,6 +4412,471 @@ const Usuarios = {
 };
 
 /* ============================================================
+   ============================================================
+   FASE 5 / BLOQUE F — CONFIG GLOBAL (cache 5 min)
+   ============================================================
+   Lectura cacheada del config para que las vistas (Caja, Cocina,
+   tickets, etc) no hagan un round-trip cada vez. Bloque G cablea
+   las vistas a esto.
+   ============================================================
+   ============================================================ */
+const Config = {
+  _CACHE_KEY: 'rg.config',
+  _TTL_MS: 5 * 60 * 1000,
+  _inflight: null,
+
+  async get() {
+    const cached = this._readCache();
+    if (cached) return cached;
+    if (this._inflight) return this._inflight;
+    this._inflight = apiGet('getConfig').then(cfg => {
+      this._writeCache(cfg);
+      this._inflight = null;
+      return cfg;
+    }).catch(e => {
+      this._inflight = null;
+      throw e;
+    });
+    return this._inflight;
+  },
+
+  async refresh() {
+    this.invalidate();
+    return this.get();
+  },
+
+  invalidate() {
+    try { localStorage.removeItem(this._CACHE_KEY); } catch (_) {}
+  },
+
+  _readCache() {
+    try {
+      const raw = localStorage.getItem(this._CACHE_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || !obj.ts || !obj.data) return null;
+      if (Date.now() - obj.ts > this._TTL_MS) return null;
+      return obj.data;
+    } catch (_) { return null; }
+  },
+
+  _writeCache(data) {
+    try {
+      localStorage.setItem(this._CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
+    } catch (_) {}
+  }
+};
+
+/* ============================================================
+   ============================================================
+   FASE 5 / BLOQUE F — VISTA CONFIGURACIÓN
+   Solo SUPERUSUARIO. 5 secciones colapsables con guardado
+   independiente por sección. Plantillas WA con preview en vivo.
+   ============================================================
+   ============================================================ */
+const Configuracion = {
+  cfg: {},
+  abiertas: new Set(),       // claves de secciones expandidas
+  guardando: false,
+
+  SECCIONES: [
+    { key: 'datos',     titulo: '🏷  Datos del restaurante' },
+    { key: 'operacion', titulo: '💼  Operación' },
+    { key: 'tiempos',   titulo: '⏱  Tiempos de alerta' },
+    { key: 'whatsapp',  titulo: '💬  WhatsApp' },
+    { key: 'horario',   titulo: '🕒  Horario' }
+  ],
+
+  // Defaults usados como hints visuales y para preview de plantillas
+  DEFAULTS: {
+    WA_TEMPLATE_TICKET:
+      '🍽️ *¡Gracias por visitarnos, {cliente}!* 🐟\n\n' +
+      '✨ *{razonSocial}*\n\n' +
+      '💰 *TOTAL:* {total}\n' +
+      '💳 Método: {metodo}\n\n' +
+      '{ticketLink}\n' +
+      '{comprobante}\n\n' +
+      '💚 Te esperamos pronto.',
+    WA_TEMPLATE_PLATO_LISTO:
+      '🍽️ *Plato listo*\n\n' +
+      'Mesa {mesa}\n' +
+      '{plato}\n\n' +
+      'Por favor recoger en cocina.',
+    WA_TEMPLATE_CIERRE:
+      '🌙 *ANCLAJE DEL DÍA*\n' +
+      '*{razonSocial}*\n\n' +
+      '📅 {fechaCorte}\n' +
+      '👤 Ancló: {usuarioNombre} ({rol})\n' +
+      '⚙️ Modo: {modo}\n\n' +
+      '💰 Total ventas: {totalVentas}\n' +
+      '*Total neto: {totalNeto}*\n' +
+      '💵 Efectivo: {efectivo} (dif {difEfectivo})\n' +
+      '📱 Transfer: {transfer} (dif {difTransfer})\n\n' +
+      '🏆 Top 3:\n{top3}\n\n' +
+      '📝 {observacion}'
+  },
+
+  PREVIEW_DATA: {
+    cliente: 'Juan', razonSocial: 'Restaurante y Pescadería Ramírez',
+    total: '$ 85.000', metodo: 'EFECTIVO',
+    ticketLink: '🧾 Ver ticket: https://...',
+    comprobante: '',
+    mesero: 'Carlos', mesa: '5', plato: '2× BANDEJA DE TILAPIA',
+    fechaCorte: '25/05/2026 22:00:00',
+    usuarioNombre: 'Oscar Polania', rol: 'SUPERUSUARIO', modo: 'MANUAL',
+    totalVentas: '$ 1.250.000', totalNeto: '$ 1.200.000',
+    efectivo: '$ 800.000', difEfectivo: '$ 0',
+    transfer: '$ 400.000', difTransfer: '$ 0',
+    top3: '1. BANDEJA DE TILAPIA × 8\n2. CALDO DE PESCADO × 5\n3. CERVEZA × 12',
+    observacion: 'Sin novedades.'
+  },
+
+  async abrir() {
+    showView('configuracion');
+    if (!this.abiertas.size) this.abiertas.add('datos');  // primera abierta por default
+    await this.cargar();
+  },
+
+  async cargar() {
+    startLoading();
+    try {
+      this.cfg = await Config.refresh();   // forzar refresh
+      this.render();
+    } catch (e) {
+      alertErr('Error al cargar configuración', e.message);
+    } finally {
+      stopLoading();
+    }
+  },
+
+  render() {
+    const cont = $('#cfg-content');
+    if (!cont) return;
+    cont.innerHTML = this.SECCIONES.map(s => this.renderSeccion(s)).join('');
+
+    // Acordeón
+    $$('[data-cfg-toggle]', cont).forEach(h => {
+      h.addEventListener('click', () => {
+        const key = h.dataset.cfgToggle;
+        if (this.abiertas.has(key)) this.abiertas.delete(key);
+        else this.abiertas.add(key);
+        this.render();
+      });
+    });
+    // Botones de guardar por sección
+    $$('[data-cfg-save]', cont).forEach(b => {
+      b.addEventListener('click', () => this.guardarSeccion(b.dataset.cfgSave));
+    });
+    // Subir logo
+    const fileLogo = $('#cfg-logo-file');
+    if (fileLogo) fileLogo.addEventListener('change', () => this.subirLogo(fileLogo));
+    // Preview plantillas
+    ['WA_TEMPLATE_TICKET','WA_TEMPLATE_PLATO_LISTO','WA_TEMPLATE_CIERRE'].forEach(k => {
+      const ta = $('#cfg-' + k);
+      if (ta) ta.addEventListener('input', () => this.actualizarPreview(k));
+    });
+    // Toggle visibilidad de BB_API_KEY (siempre marcada como solo-lectura)
+    // — sin acción, solo mostrar el hint.
+  },
+
+  renderSeccion(s) {
+    const open = this.abiertas.has(s.key);
+    const body = this.renderBody(s.key);
+    return `
+      <section class="cfg-section ${open ? 'open' : ''}">
+        <button type="button" class="cfg-section__head" data-cfg-toggle="${s.key}">
+          <span class="cfg-section__title">${s.titulo}</span>
+          <svg class="cfg-section__chevron" width="18" height="18" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+        <div class="cfg-section__body">
+          ${body}
+          <div class="cfg-section__foot">
+            <button class="btn btn-primary btn-sm" data-cfg-save="${s.key}">
+              💾 Guardar sección
+            </button>
+          </div>
+        </div>
+      </section>`;
+  },
+
+  renderBody(key) {
+    const c = this.cfg;
+    const v = (k, def) => escapeHtml(String(c[k] == null ? (def || '') : c[k]));
+    switch (key) {
+      case 'datos':
+        return `
+          <label>Razón social</label>
+          <input id="cfg-RESTAURANTE_RAZON_SOCIAL" type="text" value="${v('RESTAURANTE_RAZON_SOCIAL')}" />
+          <div class="grid-2">
+            <div>
+              <label>NIT</label>
+              <input id="cfg-RESTAURANTE_NIT" type="text" value="${v('RESTAURANTE_NIT')}" />
+            </div>
+            <div>
+              <label>Teléfono</label>
+              <input id="cfg-RESTAURANTE_TELEFONO" type="tel" value="${v('RESTAURANTE_TELEFONO')}" />
+            </div>
+          </div>
+          <label>Dirección</label>
+          <input id="cfg-RESTAURANTE_DIRECCION" type="text" value="${v('RESTAURANTE_DIRECCION')}" />
+          <label>Logo del restaurante</label>
+          <div class="cfg-logo">
+            <img id="cfg-logo-preview" src="${v('RESTAURANTE_LOGO_URL') || PLACEHOLDER_PRODUCTO}"
+                 alt="Logo" onerror="this.src='${PLACEHOLDER_PRODUCTO}'" />
+            <div class="cfg-logo__right">
+              <input id="cfg-RESTAURANTE_LOGO_URL" type="text" value="${v('RESTAURANTE_LOGO_URL')}"
+                     placeholder="https://..." />
+              <label class="cfg-logo__btn">
+                📷 Subir nueva
+                <input id="cfg-logo-file" type="file" accept="image/*" hidden />
+              </label>
+            </div>
+          </div>
+          <label>Pie del ticket (texto pequeño al final)</label>
+          <textarea id="cfg-RESTAURANTE_TICKET_PIE" rows="2">${v('RESTAURANTE_TICKET_PIE')}</textarea>`;
+
+      case 'operacion':
+        return `
+          <div class="grid-2">
+            <div>
+              <label>Descuento máximo de caja (%)</label>
+              <input id="cfg-CAJA_DESCUENTO_MAX_PCT" type="number" min="0" max="100" step="1"
+                     value="${v('CAJA_DESCUENTO_MAX_PCT', '10')}" />
+              <p class="muted" style="font-size:0.74rem;">Si caja necesita más, el SUPER lo puede autorizar.</p>
+            </div>
+            <div>
+              <label>Propina sugerida (%)</label>
+              <input id="cfg-PROPINA_SUGERIDA_PCT" type="number" min="0" max="30" step="1"
+                     value="${v('PROPINA_SUGERIDA_PCT', '10')}" />
+              <p class="muted" style="font-size:0.74rem;">Se mostrará como sugerencia al cobrar.</p>
+            </div>
+          </div>`;
+
+      case 'tiempos':
+        return `
+          <h4 class="cfg-sub">Cocina (Comanda)</h4>
+          <div class="grid-2">
+            <div>
+              <label>Amarillo a los (min)</label>
+              <input id="cfg-COCINA_WARN_MIN" type="number" min="1" max="120" step="1"
+                     value="${v('COCINA_WARN_MIN', '15')}" />
+            </div>
+            <div>
+              <label>Rojo a los (min)</label>
+              <input id="cfg-COCINA_LATE_MIN" type="number" min="1" max="120" step="1"
+                     value="${v('COCINA_LATE_MIN', '25')}" />
+            </div>
+          </div>
+          <h4 class="cfg-sub" style="margin-top:14px;">Caja (esperando cuenta)</h4>
+          <div class="grid-2">
+            <div>
+              <label>Amarillo a los (min)</label>
+              <input id="cfg-CAJA_WARN_MIN" type="number" min="1" max="60" step="1"
+                     value="${v('CAJA_WARN_MIN', '3')}" />
+            </div>
+            <div>
+              <label>Rojo a los (min)</label>
+              <input id="cfg-CAJA_LATE_MIN" type="number" min="1" max="60" step="1"
+                     value="${v('CAJA_LATE_MIN', '7')}" />
+            </div>
+          </div>`;
+
+      case 'whatsapp':
+        return `
+          <label>URL del bot WhatsApp</label>
+          <input id="cfg-BB_API_URL" type="url" value="${v('BB_API_URL')}"
+                 placeholder="https://app.builderbot.cloud/api/v2/..." />
+          <p class="muted" style="font-size:0.72rem;">
+            La <b>API Key</b> del bot se edita solo desde la hoja CONFIGURACION (es un secreto).
+          </p>
+
+          <label>Teléfono del dueño (recibe el resumen diario)</label>
+          <input id="cfg-WA_TELEFONO_DUENO" type="tel" inputmode="numeric" maxlength="10"
+                 value="${v('WA_TELEFONO_DUENO')}" placeholder="3001234567" />
+
+          ${this.renderTemplate('WA_TEMPLATE_TICKET', 'Plantilla: ticket al cliente')}
+          ${this.renderTemplate('WA_TEMPLATE_PLATO_LISTO', 'Plantilla: plato listo (mesero)')}
+          ${this.renderTemplate('WA_TEMPLATE_CIERRE', 'Plantilla: resumen diario al dueño')}`;
+
+      case 'horario':
+        return `
+          <div class="grid-2">
+            <div>
+              <label>Hora de apertura (HH:mm)</label>
+              <input id="cfg-RESTAURANTE_HORA_APERTURA" type="text" maxlength="5"
+                     value="${v('RESTAURANTE_HORA_APERTURA', '11:00')}" placeholder="11:00" />
+            </div>
+            <div>
+              <label>Hora de cierre (HH:mm)</label>
+              <input id="cfg-RESTAURANTE_HORA_CIERRE" type="text" maxlength="5"
+                     value="${v('RESTAURANTE_HORA_CIERRE', '22:00')}" placeholder="22:00" />
+            </div>
+          </div>
+          <p class="muted" style="font-size:0.74rem;">
+            Si el cierre es menor que la apertura (ej. 11:00 → 02:00), se entiende cierre al día siguiente.
+          </p>`;
+    }
+    return '';
+  },
+
+  renderTemplate(clave, label) {
+    const valor = String(this.cfg[clave] == null ? '' : this.cfg[clave]);
+    const defStr = this.DEFAULTS[clave] || '';
+    const previewStr = this.calcularPreview(valor || defStr);
+    return `
+      <div class="cfg-template">
+        <label>${escapeHtml(label)}</label>
+        <textarea id="cfg-${clave}" rows="7" placeholder="Dejar vacío para usar la plantilla por defecto">${escapeHtml(valor)}</textarea>
+        <p class="muted" style="font-size:0.7rem; margin: 2px 0 6px;">
+          ${valor ? 'Plantilla personalizada activa.' : 'Vacío → se usará la plantilla por defecto.'}
+        </p>
+        <div class="cfg-preview-label">Vista previa con datos de ejemplo:</div>
+        <pre class="cfg-preview" id="cfg-preview-${clave}">${escapeHtml(previewStr)}</pre>
+      </div>`;
+  },
+
+  calcularPreview(template) {
+    let out = String(template || '');
+    Object.entries(this.PREVIEW_DATA).forEach(([k, v]) => {
+      out = out.split('{' + k + '}').join(v);
+    });
+    return out;
+  },
+
+  actualizarPreview(clave) {
+    const ta = $('#cfg-' + clave);
+    const prev = $('#cfg-preview-' + clave);
+    if (!ta || !prev) return;
+    const valor = ta.value || this.DEFAULTS[clave] || '';
+    prev.textContent = this.calcularPreview(valor);
+  },
+
+  // ── Validaciones por sección ──────────────────────────────
+  validarSeccion(key, datos) {
+    if (key === 'datos') {
+      const rs = String(datos.RESTAURANTE_RAZON_SOCIAL || '').trim();
+      if (rs.length < 3) return 'Razón social debe tener al menos 3 caracteres';
+      const url = String(datos.RESTAURANTE_LOGO_URL || '').trim();
+      if (url && !/^https?:\/\//.test(url)) return 'La URL del logo debe empezar con https://';
+    }
+    if (key === 'operacion') {
+      const d = Number(datos.CAJA_DESCUENTO_MAX_PCT);
+      if (!(d >= 0 && d <= 100)) return 'Descuento máximo entre 0 y 100';
+      const p = Number(datos.PROPINA_SUGERIDA_PCT);
+      if (!(p >= 0 && p <= 30)) return 'Propina sugerida entre 0 y 30';
+    }
+    if (key === 'tiempos') {
+      const cw = Number(datos.COCINA_WARN_MIN), cl = Number(datos.COCINA_LATE_MIN);
+      const xw = Number(datos.CAJA_WARN_MIN),   xl = Number(datos.CAJA_LATE_MIN);
+      if (!(cw >= 1 && cw <= 120)) return 'Cocina amarillo entre 1 y 120 min';
+      if (!(cl >= 1 && cl <= 120)) return 'Cocina rojo entre 1 y 120 min';
+      if (cl <= cw) return 'Cocina rojo debe ser mayor que cocina amarillo';
+      if (!(xw >= 1 && xw <= 60))  return 'Caja amarillo entre 1 y 60 min';
+      if (!(xl >= 1 && xl <= 60))  return 'Caja rojo entre 1 y 60 min';
+      if (xl <= xw) return 'Caja rojo debe ser mayor que caja amarillo';
+    }
+    if (key === 'whatsapp') {
+      const u = String(datos.BB_API_URL || '').trim();
+      if (u && !/^https?:\/\//.test(u)) return 'La URL del bot debe empezar con https://';
+      const t = String(datos.WA_TELEFONO_DUENO || '').trim();
+      if (t && !/^3\d{9}$/.test(t)) return 'Teléfono del dueño debe ser celular Colombia (10 dígitos, inicia en 3)';
+    }
+    if (key === 'horario') {
+      const re = /^\d{2}:\d{2}$/;
+      const ha = String(datos.RESTAURANTE_HORA_APERTURA || '').trim();
+      const hc = String(datos.RESTAURANTE_HORA_CIERRE || '').trim();
+      if (!re.test(ha)) return 'Hora de apertura debe tener formato HH:mm';
+      if (!re.test(hc)) return 'Hora de cierre debe tener formato HH:mm';
+      const [ah, am] = ha.split(':').map(Number);
+      const [ch, cm] = hc.split(':').map(Number);
+      if (ah > 23 || am > 59 || ch > 23 || cm > 59) return 'Hora inválida (rango 00:00 - 23:59)';
+    }
+    return null;
+  },
+
+  // ── Mapeo sección → claves ────────────────────────────────
+  clavesDeSeccion(key) {
+    switch (key) {
+      case 'datos':     return ['RESTAURANTE_RAZON_SOCIAL','RESTAURANTE_NIT','RESTAURANTE_TELEFONO',
+                                'RESTAURANTE_DIRECCION','RESTAURANTE_LOGO_URL','RESTAURANTE_TICKET_PIE'];
+      case 'operacion': return ['CAJA_DESCUENTO_MAX_PCT','PROPINA_SUGERIDA_PCT'];
+      case 'tiempos':   return ['COCINA_WARN_MIN','COCINA_LATE_MIN','CAJA_WARN_MIN','CAJA_LATE_MIN'];
+      case 'whatsapp':  return ['BB_API_URL','WA_TELEFONO_DUENO',
+                                'WA_TEMPLATE_TICKET','WA_TEMPLATE_PLATO_LISTO','WA_TEMPLATE_CIERRE'];
+      case 'horario':   return ['RESTAURANTE_HORA_APERTURA','RESTAURANTE_HORA_CIERRE'];
+    }
+    return [];
+  },
+
+  async guardarSeccion(key) {
+    if (this.guardando) return;
+    const claves = this.clavesDeSeccion(key);
+    const datos = {};
+    claves.forEach(k => {
+      const el = $('#cfg-' + k);
+      if (el) datos[k] = el.value;
+    });
+    const err = this.validarSeccion(key, datos);
+    if (err) return alertWarn('Revisa los datos', err);
+
+    this.guardando = true;
+    startLoading();
+    try {
+      await apiPost('setConfig', withUser({ seccion: key.toUpperCase(), config: datos }));
+      // Sincronizar estado local + invalidar cache global
+      claves.forEach(k => { this.cfg[k] = datos[k]; });
+      Config.invalidate();
+      stopLoading();
+      this.guardando = false;
+      Toast && Toast.fire({ icon: 'success', title: 'Sección guardada' });
+    } catch (e) {
+      stopLoading();
+      this.guardando = false;
+      alertErr('Error al guardar', e.message);
+    }
+  },
+
+  async subirLogo(inputEl) {
+    const file = inputEl.files && inputEl.files[0];
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) {
+      alertWarn('Imagen muy grande', 'Máximo 4 MB.');
+      inputEl.value = '';
+      return;
+    }
+    startLoading();
+    try {
+      const base64 = await fileToBase64(file);
+      const r = await apiPost('subirLogoConfig', withUser({
+        filename: file.name, base64
+      }));
+      // Actualizar input + preview, pero NO guardar todavía:
+      // el usuario debe hacer "Guardar sección" para persistir.
+      const inp = $('#cfg-RESTAURANTE_LOGO_URL');
+      const img = $('#cfg-logo-preview');
+      if (inp) inp.value = r.url;
+      if (img) img.src   = r.url;
+      stopLoading();
+      Toast && Toast.fire({
+        icon: 'info',
+        title: 'Logo subido — recuerda guardar la sección'
+      });
+    } catch (e) {
+      stopLoading();
+      alertErr('No se pudo subir el logo', e.message);
+    } finally {
+      inputEl.value = '';
+    }
+  },
+
+  desenganchar() { /* sin listeners persistentes */ },
+  setupListeners() { /* binds se hacen en render() */ }
+};
+
+/* ============================================================
    INICIALIZACIÓN
    ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
@@ -4428,7 +4895,8 @@ window.addEventListener('DOMContentLoaded', () => {
   Pedidos.setupListeners();
   Comanda.setupListeners();
   Caja.setupListeners();
- // Fase 5
+// Fase 5
   Anclaje.setupListeners();
   Usuarios.setupListeners();
+  Configuracion.setupListeners();
 });
