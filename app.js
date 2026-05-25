@@ -2003,13 +2003,17 @@ abrirPedidoExistente(pedidoId, mesaId) {
           <div style="font-size:2.4rem; opacity:0.4;">🍽️</div>
           <p class="muted">Aún no hay productos. Toca <b>+</b> para empezar.</p>
         </div>`;
-    } else {
+} else {
       cont.innerHTML = itemsArr.map(it => this.renderItem(it)).join('');
       $$('[data-item-cancel]', cont).forEach(b => {
         b.addEventListener('click', () => this.cancelarItem(b.dataset.itemCancel));
       });
       $$('[data-item-servir]', cont).forEach(b => {
         b.addEventListener('click', () => this.marcarServido(b.dataset.itemServir));
+      });
+      // Fase 4D — tap sobre el nombre del ítem (sólo si editable) abre el modal de edición
+      $$('[data-item-edit]', cont).forEach(b => {
+        b.addEventListener('click', () => this.editarItem(b.dataset.itemEdit));
       });
     }
 
@@ -2023,12 +2027,14 @@ abrirPedidoExistente(pedidoId, mesaId) {
     } else {
       descRow.classList.add('hidden');
     }
-    // Botón "Pedir cuenta": visible cuando el pedido está SERVIDO o PARCIAL,
-    // oculto si ya está PIDIENDO_CUENTA o aún hay ítems en cocina.
+ // Botón "Pedir cuenta": SÓLO visible cuando TODO el pedido está SERVIDO
+    // (todos los ítems no-cancelados ya marcados servidos). Si aún hay algo
+    // en cocina o pendiente, el botón ni aparece — protege al cliente de
+    // pedir cuenta con platos pendientes.
     const btnCuenta = $('#pd-btn-cuenta');
     if (btnCuenta) {
       const est = String(meta.estado || '').toUpperCase();
-      const puedePedir = ['SERVIDO','PARCIAL_SERVIDO'].indexOf(est) >= 0;
+      const puedePedir = est === 'SERVIDO';
       const yaPedida   = est === 'PIDIENDO_CUENTA';
       btnCuenta.classList.toggle('hidden', !(puedePedir || yaPedida));
       btnCuenta.disabled = yaPedida;
@@ -2051,6 +2057,11 @@ abrirPedidoExistente(pedidoId, mesaId) {
     const cancelado = it.cancelado;
     const estPrep   = String(it.estadoPrep || '').toUpperCase();
     const esRapido  = !it.esPreparacion;
+    // Fase 4D — Editable si: no cancelado, no temporal, y aún no fue a cocina
+    // (PENDIENTE para preparación; NO_APLICA para rápidos). Servido / listo /
+    // en cocina ya NO se editan — sólo se cancelan.
+    const editable = !cancelado && !it._tmp &&
+                     (estPrep === 'PENDIENTE' || estPrep === 'NO_APLICA');
 
     const badge = (() => {
       if (cancelado) return `<span class="pd-item__badge pd-item__badge--cancel">Cancelado</span>`;
@@ -2080,12 +2091,16 @@ abrirPedidoExistente(pedidoId, mesaId) {
       }
     }
 
+    const nameAttr = editable
+      ? `class="pd-item__name pd-item__name--editable" data-item-edit="${it.id}" title="Tocar para editar"`
+      : `class="pd-item__name"`;
+
     return `
       <article class="pd-item ${cancelado ? 'is-cancelado' : ''} ${it._tmp ? 'is-tmp' : ''}">
         <div class="pd-item__qty">${it.cantidad}×</div>
         <div class="pd-item__body">
           <div class="pd-item__head">
-            <h4 class="pd-item__name">${escapeHtml(it.nombre)}</h4>
+            <h4 ${nameAttr}>${escapeHtml(it.nombre)}${editable ? ' <span class="pd-item__edit-hint">✎</span>' : ''}</h4>
             ${badge}
           </div>
           ${mods ? `<ul class="pd-item__mods">${mods}</ul>` : ''}
@@ -2099,7 +2114,6 @@ abrirPedidoExistente(pedidoId, mesaId) {
       </article>
     `;
   },
-
   volverAGrilla() {
     this.desengancharRTDBPedido();
     this.pedidoActual = null;
@@ -2227,16 +2241,29 @@ abrirPedidoExistente(pedidoId, mesaId) {
   /* ────────────────────────────────────────────
      MODAL DE PRODUCTO (cantidad + mods + nota)
      ──────────────────────────────────────────── */
-  abrirModalProducto(producto) {
+  abrirModalProducto(producto, initial) {
+    // Fase 4D — `initial` opcional: { cantidad, modificadores, descripcion, itemId }
+    // Si viene, el modal arranca en modo edición (precargado + título "Editar").
     const grupos = (this.catalogo.modificadores[producto.id] || []);
     const self = this;
+    const esEdicion = !!(initial && initial.itemId);
+    // Set rápido de "grupo|opcion" -> true para marcar las opciones preseleccionadas
+    const seleccionPrev = {};
+    if (initial && initial.modificadores) {
+      initial.modificadores.forEach(m => {
+        seleccionPrev[String(m.grupo) + '|' + String(m.opcion)] = true;
+      });
+    }
 
     const gruposHTML = grupos.map((g, gi) => {
       const isUnica = String(g.tipoSeleccion || 'UNICA').toUpperCase() === 'UNICA';
       const opsHTML = g.opciones.map((o, oi) => {
         const type = isUnica ? 'radio' : 'checkbox';
         const name = isUnica ? `mp-g-${gi}` : `mp-g-${gi}-${oi}`;
-        const checked = (isUnica && g.obligatorio && oi === 0) ? 'checked' : '';
+        // Si estamos en edición, marcar las opciones que el ítem ya tenía
+        const preMarcado = seleccionPrev[String(g.grupo) + '|' + String(o.opcion)];
+        const defaultMark = (isUnica && g.obligatorio && oi === 0 && !esEdicion);
+        const checked = (preMarcado || defaultMark) ? 'checked' : '';
         const delta = Number(o.precioDelta) || 0;
         const deltaStr = delta === 0 ? '' :
           (delta > 0 ? `+${fmtPesos(delta)}` : `${fmtPesos(delta)}`);
@@ -2261,9 +2288,23 @@ abrirPedidoExistente(pedidoId, mesaId) {
         </div>
       `;
     }).join('');
+      return `
+        <div class="mp-grupo">
+          <div class="mp-grupo__head">
+            <strong>${escapeHtml(g.nombreGrupo || g.grupo)}</strong>
+            ${g.obligatorio ? `<span class="mp-tag mp-tag--oblig">Obligatorio</span>` : ''}
+            <span class="mp-tag">${isUnica ? 'Única' : 'Múltiple'}</span>
+          </div>
+          <div class="mp-opts">${opsHTML}</div>
+        </div>
+      `;
+    }).join('');
+
+    const cantIni = (initial && initial.cantidad) ? Math.max(1, Number(initial.cantidad)) : 1;
+    const notaIni = (initial && initial.descripcion) ? initial.descripcion : '';
 
     Swal.fire({
-      title: producto.nombre,
+      title: esEdicion ? `Editar: ${producto.nombre}` : producto.nombre,
       html: `
         <div class="mp">
           <div class="mp__img-wrap">
@@ -2276,7 +2317,7 @@ abrirPedidoExistente(pedidoId, mesaId) {
             <span class="mp__qty-lbl">Cantidad</span>
             <div class="mp__qty">
               <button type="button" class="mp__qty-btn" data-mp-qty="-">−</button>
-              <input type="number" id="mp-cantidad" value="1" min="1" max="50" />
+              <input type="number" id="mp-cantidad" value="${cantIni}" min="1" max="50" />
               <button type="button" class="mp__qty-btn" data-mp-qty="+">+</button>
             </div>
           </div>
@@ -2284,7 +2325,7 @@ abrirPedidoExistente(pedidoId, mesaId) {
           ${gruposHTML}
 
           <label>Nota especial (opcional)</label>
-          <textarea id="mp-nota" placeholder="Ej: sin cebolla, punto medio…"></textarea>
+          <textarea id="mp-nota" placeholder="Ej: sin cebolla, punto medio…">${escapeHtml(notaIni)}</textarea>
 
           <div class="mp__total-row">
             <span>Total</span>
@@ -2294,7 +2335,7 @@ abrirPedidoExistente(pedidoId, mesaId) {
       `,
       width: 560,
       showCancelButton: true,
-      confirmButtonText: 'Agregar al pedido',
+      confirmButtonText: esEdicion ? 'Guardar cambios' : 'Agregar al pedido',
       cancelButtonText: 'Cancelar',
       reverseButtons: true,
       focusConfirm: false,
@@ -2347,9 +2388,13 @@ abrirPedidoExistente(pedidoId, mesaId) {
           descripcion: $('#mp-nota').value.trim()
         };
       }
-    }).then(async (res) => {
+   }).then(async (res) => {
       if (!res.isConfirmed) return;
-      await self.agregarItem(producto, res.value);
+      if (esEdicion) {
+        await self.guardarEdicionItem(initial.itemId, producto, res.value);
+      } else {
+        await self.agregarItem(producto, res.value);
+      }
     });
   },
 
@@ -2384,14 +2429,13 @@ abrirPedidoExistente(pedidoId, mesaId) {
     };
     if (!this.pedidoActual.items) this.pedidoActual.items = {};
     this.pedidoActual.items[tmpId] = tmpItem;
-    if (!this.pedidoActual.meta) this.pedidoActual.meta = {};
+   if (!this.pedidoActual.meta) this.pedidoActual.meta = {};
     const meta = this.pedidoActual.meta;
     meta.subtotal = (Number(meta.subtotal) || 0) + subtotal;
     meta.total    = meta.subtotal - (Number(meta.descuentoValor) || 0);
     this.renderDetalle();
 
-    Toast && Toast.fire({ icon: 'success', title: `${datos.cantidad}× ${producto.nombre}` });
-
+    // Sin Toast — el ítem nuevo apareciendo en la lista con badge ⏳ es el feedback.
     // POST en background. El listener RTDB confirma (o no llega y revertimos).
     try {
       await apiPost('agregarItem', withUser({
@@ -2401,7 +2445,7 @@ abrirPedidoExistente(pedidoId, mesaId) {
         modificadores: datos.modificadores,
         descripcion:   datos.descripcion
       }));
-    } catch (e) {
+   } catch (e) {
       // Revertir: borrar el tmp y restar del total
       if (this.pedidoActual && this.pedidoActual.items && this.pedidoActual.items[tmpId]) {
         delete this.pedidoActual.items[tmpId];
@@ -2411,6 +2455,82 @@ abrirPedidoExistente(pedidoId, mesaId) {
         this.renderDetalle();
       }
       alertErr('Error al agregar', e.message);
+    }
+  },
+
+  /* ────────────────────────────────────────────
+     FASE 4D — EDITAR ÍTEM YA INGRESADO
+     ──────────────────────────────────────────── */
+  async editarItem(itemId) {
+    if (!this.pedidoActual) return;
+    const it = (this.pedidoActual.items || {})[itemId];
+    if (!it) return;
+    // Defensa: aunque el badge ya no debería renderizar el botón si no es
+    // editable, validamos por si el snapshot RTDB cambió mientras tanto.
+    const estPrep = String(it.estadoPrep || '').toUpperCase();
+    if (estPrep !== 'PENDIENTE' && estPrep !== 'NO_APLICA') {
+      Toast && Toast.fire({ icon: 'warning', title: 'Ya no se puede editar — está en cocina' });
+      return;
+    }
+    if (!this.catalogo) await this.cargarCatalogo();
+    const producto = this.catalogo.productos.find(p => p.id === it.productoId);
+    if (!producto) return alertErr('Error', 'No se encontró el producto en el catálogo.');
+    this.abrirModalProducto(producto, {
+      itemId,
+      cantidad:      it.cantidad,
+      modificadores: it.modificadores || [],
+      descripcion:   it.descripcion   || ''
+    });
+  },
+
+  async guardarEdicionItem(itemId, producto, datos) {
+    if (!this.pedidoActual) return;
+    const it = (this.pedidoActual.items || {})[itemId];
+    if (!it) return;
+
+    // Cálculo optimista del nuevo subtotal
+    const deltaTotal = (datos.modificadores || [])
+      .reduce((s, m) => s + (Number(m.precioDelta) || 0), 0);
+    const precioNuevo   = (Number(producto.precioBase) || 0) + deltaTotal;
+    const subtotalNuevo = precioNuevo * datos.cantidad;
+    const subtotalPrev  = Number(it.subtotal) || 0;
+
+    // Aplicar overrides locales del ítem y recalcular totales del pedido
+    const itPrev = { ...it };
+    it.cantidad       = datos.cantidad;
+    it.precioUnitario = precioNuevo;
+    it.subtotal       = subtotalNuevo;
+    it.modificadores  = datos.modificadores || [];
+    it.descripcion    = datos.descripcion   || '';
+    it._tmp           = true;  // pinta ⏳ hasta que confirme el RTDB
+
+    const meta = this.pedidoActual.meta;
+    meta.subtotal = (Number(meta.subtotal) || 0) - subtotalPrev + subtotalNuevo;
+    meta.total    = meta.subtotal - (Number(meta.descuentoValor) || 0);
+    this.renderDetalle();
+
+    try {
+      await apiPost('editarItem', withUser({
+        itemId,
+        cantidad:      datos.cantidad,
+        modificadores: datos.modificadores,
+        descripcion:   datos.descripcion
+      }));
+      // El listener RTDB confirma — pero por si llega tarde, limpiamos _tmp
+      // proactivamente para que el badge ⏳ desaparezca.
+      if (this.pedidoActual.items[itemId]) {
+        this.pedidoActual.items[itemId]._tmp = false;
+        this.renderDetalle();
+      }
+    } catch (e) {
+      // Revertir
+      if (this.pedidoActual.items[itemId]) {
+        Object.assign(this.pedidoActual.items[itemId], itPrev);
+      }
+      meta.subtotal = (Number(meta.subtotal) || 0) + subtotalPrev - subtotalNuevo;
+      meta.total    = meta.subtotal - (Number(meta.descuentoValor) || 0);
+      this.renderDetalle();
+      alertErr('Error al editar', e.message);
     }
   },
 
@@ -2530,12 +2650,8 @@ if (sInp && !sInp._bound) {
     const meta = this.pedidoActual.meta || {};
     if (String(meta.estado).toUpperCase() === 'PIDIENDO_CUENTA') return;
 
-    const ok = await confirmar('Pedir cuenta',
-      `¿Notificar a caja que la mesa <b>#${meta.mesaNumero}</b> pide la cuenta por <b>${fmtPesos(meta.total)}</b>?`,
-      'Sí, pedir');
-    if (!ok) return;
-
-    // Optimista: actualizar UI antes de la respuesta
+    // Sin confirmar ni Toast. Tap único → optimistic UI YA → POST background.
+    // El feedback es el botón cambiando a "💰 Cuenta pedida" deshabilitado.
     const estadoPrev = meta.estado;
     meta.estado = 'PIDIENDO_CUENTA';
     this.renderDetalle();
@@ -2543,7 +2659,7 @@ if (sInp && !sInp._bound) {
 
     try {
       await apiPost('pedirCuenta', withUser({ pedidoId: this.pedidoActual.id }));
-      Toast && Toast.fire({ icon: 'success', title: 'Caja notificada' });
+      // Sin Toast — el botón ya muestra "Cuenta pedida".
     } catch (e) {
       meta.estado = estadoPrev;
       this.renderDetalle();
