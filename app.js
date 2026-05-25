@@ -3492,7 +3492,7 @@ bindModalCobro(p, st) {
           if (pg.metodo === 'TRANSFERENCIA') pg.comprobanteUrl = comprobanteUrl;
         });
       }
-      await apiPost('cobrarPedido', withUser({
+     await apiPost('cobrarPedido', withUser({
         pedidoId:       st.pedidoId,
         descuentoPct:   datos.descuentoPct,
         descuentoValor: datos.descuentoValor,
@@ -3501,11 +3501,8 @@ bindModalCobro(p, st) {
       }));
       stopLoading();
       playSoundOnce(SOUNDS.caja);
-      const tituloOk = datos.esGenerico
-        ? 'Pedido cobrado'
-        : 'Pedido cobrado · 📱 Ticket enviado por WhatsApp';
-      Toast && Toast.fire({ icon: 'success', title: tituloOk });
-      // El listener RTDB borrará la tarjeta automáticamente
+      // Sin Toast — la tarjeta desapareciendo de la grilla es el feedback.
+      // Optimiza el tiempo entre cobros.
  } catch (e) {
       stopLoading();
       alertErr('Error al cobrar', e.message);
