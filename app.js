@@ -33,7 +33,7 @@ const SESSION_KEY = 'rgSession';
 
 const SOUNDS = {
   login:    'https://res.cloudinary.com/dqqeavica/video/upload/v1759184556/login_w0qtf6.mp3',
-  click:    'https://res.cloudinary.com/dqqeavica/video/upload/v1759166344/click_qgs94f.mp3',
+  click:    'https://res.cloudinary.com/dqqeavica/video/upload/v1759011578/Keyboard_Enter_b9k2dc.mp3',
   ok:       'https://res.cloudinary.com/dqqeavica/video/upload/v1759166346/correcto_kz0kme.mp3',
   err:      'https://res.cloudinary.com/dqqeavica/video/upload/v1759166344/error_jfaiip.mp3',
   warn:     'https://res.cloudinary.com/dqqeavica/video/upload/v1759166347/advertencia_b1hrok.mp3',
@@ -1713,23 +1713,51 @@ const Pedidos = {
   /* ────────────────────────────────────────────
      ENTRADA / GRILLA
      ──────────────────────────────────────────── */
-  async abrir() {
+async abrir() {
     showView('tomar-pedido');
-    await this.cargarInicial();
-    await this.engancharRTDB();
+    // 1. Hidratar mesasConfig desde cache local (instantáneo)
+    if (!this.mesasConfig.length) {
+      const cached = localStorage.getItem('rg.mesasConfig');
+      if (cached) {
+        try { this.mesasConfig = JSON.parse(cached); } catch (_) {}
+      }
+    }
+    // 2. Render inmediato + enganchar listener RTDB (no bloqueante)
+    this.render();
+    this.engancharRTDB();
+    // 3. Refrescar config de mesas en background si cambió
+    this.refrescarMesasConfigBg();
+    // 4. Forzar sincronización del RTDB con throttle de 30s
+    this.sincronizarVistaBg();
   },
 
-  async cargarInicial() {
-    startLoading();
+async cargarInicial() {
+    // Compat con código previo. abrir() ya orquesta todo y los fetches
+    // van en background. Mantenemos el método por si algo externo lo llama.
+    await this.refrescarMesasConfigBg();
+    this.sincronizarVistaBg();
+  },
+
+  async refrescarMesasConfigBg() {
     try {
-      this.mesasConfig = await apiGet('listMesas');
-      await apiPost('sincronizarVistaPedidos', withUser({}));
-      this.render();
-    } catch (e) {
-      alertErr('Error al cargar mesas', e.message);
-    } finally {
-      stopLoading();
-    }
+      const fresh = await apiGet('listMesas');
+      if (JSON.stringify(fresh) !== JSON.stringify(this.mesasConfig)) {
+        this.mesasConfig = fresh;
+        localStorage.setItem('rg.mesasConfig', JSON.stringify(fresh));
+        this.render();
+      }
+    } catch (e) { console.error('listMesas:', e); }
+  },
+
+  sincronizarVistaBg() {
+    const KEY = 'rg.sync.pedidos';
+    const last = Number(localStorage.getItem(KEY) || 0);
+    if (Date.now() - last < 30 * 1000) return;
+    localStorage.setItem(KEY, String(Date.now()));
+    apiPost('sincronizarVistaPedidos', withUser({})).catch(e => {
+      localStorage.removeItem(KEY);
+      console.error('sincronizarVistaPedidos:', e);
+    });
   },
 
   async engancharRTDB() {
@@ -1809,51 +1837,72 @@ const Pedidos = {
   /* ────────────────────────────────────────────
      ABRIR PEDIDO (crear o cargar)
      ──────────────────────────────────────────── */
-  async clickMesa(mesaId) {
+ async clickMesa(mesaId) {
     const st = this.estados[mesaId] || {};
     playSoundOnce(SOUNDS.click);
 
     if (st.pedidoId) {
-      // Permisos: SUPER/ADMIN abren cualquier pedido, MESERO sólo el suyo
       const esMio = String(st.meseroId) === String(state.user.id);
       const esSuperAdmin = rolEs('SUPERUSUARIO', 'ADMINISTRADOR');
       if (!esSuperAdmin && !esMio) {
         return alertWarn('Mesa ocupada',
           `Esta mesa la abrió <b>${escapeHtml(st.meseroNombre || '?')}</b>. Sólo el mesero asignado puede modificar el pedido.`);
       }
-      await this.abrirPedidoExistente(st.pedidoId);
+      this.abrirPedidoExistente(st.pedidoId, mesaId);
     } else {
-      const numero = (this.mesasConfig.find(m => m.id === mesaId) || {}).numero || '?';
-      const ok = await confirmar(`Abrir mesa ${numero}`,
-        `¿Crear un nuevo pedido en la mesa <b>#${numero}</b>?`, 'Sí, abrir');
-      if (!ok) return;
-      await this.crearYAbrirPedido(mesaId);
+      // Sin confirmar previo: un tap es suficiente. Si fue accidental
+      // se cancela el pedido desde el detalle.
+      this.crearYAbrirPedido(mesaId);
     }
   },
-
-  async crearYAbrirPedido(mesaId) {
-    startLoading();
+   
+async crearYAbrirPedido(mesaId) {
+    const mesaCfg = this.mesasConfig.find(m => m.id === mesaId);
+    // Stub optimista: navegar YA, antes del POST
+    this.pedidoActual = {
+      id: null,
+      meta: {
+        mesaNumero:    mesaCfg ? mesaCfg.numero : '?',
+        meseroNombre:  state.user.nombre,
+        estado:        'ABIERTO',
+        subtotal: 0, total: 0, descuentoValor: 0
+      },
+      items: {}
+    };
+    showView('pedido-detalle');
+    this.renderDetalle();
     try {
       const r = await apiPost('crearPedido', withUser({ mesaId }));
-      stopLoading();
-      await this.abrirPedidoExistente(r.id);
+      this.pedidoActual.id = r.id;
+      // crearPedido ya proyectó al RTDB. Enganchamos.
+      this.engancharRTDBPedido(r.id);
     } catch (e) {
-      stopLoading();
       alertErr('Error al abrir mesa', e.message);
+      this.volverAGrilla();
     }
   },
 
-  async abrirPedidoExistente(pedidoId) {
-    startLoading();
-    try {
-      await apiPost('sincronizarPedido', withUser({ id: pedidoId }));
-      this.engancharRTDBPedido(pedidoId);
-      showView('pedido-detalle');
-      stopLoading();
-    } catch (e) {
-      stopLoading();
-      alertErr('Error al cargar pedido', e.message);
-    }
+abrirPedidoExistente(pedidoId, mesaId) {
+    // Stub optimista con info del RTDB cacheado en this.estados
+    const st = (mesaId && this.estados[mesaId]) || {};
+    const mesaCfg = mesaId ? this.mesasConfig.find(m => m.id === mesaId) : null;
+    this.pedidoActual = {
+      id: pedidoId,
+      meta: {
+        mesaNumero:     mesaCfg ? mesaCfg.numero : '?',
+        meseroNombre:   st.meseroNombre || '',
+        estado:         st.estado || 'ABIERTO',
+        subtotal:       st.total || 0,
+        total:          st.total || 0,
+        descuentoValor: 0
+      },
+      items: {}
+    };
+    showView('pedido-detalle');
+    this.renderDetalle();
+    // RTDB ya está fresco (cualquier acción previa lo proyectó).
+    // El listener trae items reales en <300ms.
+    this.engancharRTDBPedido(pedidoId);
   },
 
   engancharRTDBPedido(pedidoId) {
@@ -2060,8 +2109,12 @@ const Pedidos = {
   /* ────────────────────────────────────────────
      CATÁLOGO EMBEBIDO
      ──────────────────────────────────────────── */
-  async abrirCatalogo() {
+ async abrirCatalogo() {
     if (!this.pedidoActual) return;
+    if (!this.pedidoActual.id) {
+      Toast && Toast.fire({ icon: 'info', title: 'Un momento, abriendo mesa…' });
+      return;
+    }
     showView('pedido-catalogo');
     if (!this.catalogo) await this.cargarCatalogo();
     this.renderCatalogo();
@@ -2511,22 +2564,30 @@ const Comanda = {
   _ref: null,
   _tickInterval: null,
 
-  async abrir() {
+async abrir() {
     showView('comanda');
-    await this.cargarInicial();
-    await this.engancharRTDB();
+    // Render inmediato + enganchar listener (no bloqueante)
+    this.render();
+    this.engancharRTDB();
     this.startTicker();
+    // Sincronización del RTDB en background con throttle 30s
+    this.sincronizarVistaBg();
   },
 
-  async cargarInicial() {
-    startLoading();
-    try {
-      await apiPost('sincronizarVistaCocina', withUser({}));
-    } catch (e) {
-      alertErr('Error al cargar comanda', e.message);
-    } finally {
-      stopLoading();
-    }
+async cargarInicial() {
+    // Compat — abrir() ya orquesta todo en background.
+    this.sincronizarVistaBg();
+  },
+
+  sincronizarVistaBg() {
+    const KEY = 'rg.sync.cocina';
+    const last = Number(localStorage.getItem(KEY) || 0);
+    if (Date.now() - last < 30 * 1000) return;
+    localStorage.setItem(KEY, String(Date.now()));
+    apiPost('sincronizarVistaCocina', withUser({})).catch(e => {
+      localStorage.removeItem(KEY);
+      console.error('sincronizarVistaCocina:', e);
+    });
   },
 
   async engancharRTDB() {
@@ -2739,27 +2800,49 @@ const Caja = {
 
   async abrir() {
     showView('caja');
-    await this.cargarInicial();
-    await this.engancharRTDB();
+    // 1. Hidratar config desde cache local
+    if (!this.config) {
+      const cached = localStorage.getItem('rg.cajaConfig');
+      if (cached) {
+        try { this.config = JSON.parse(cached); } catch (_) {}
+      }
+    }
+    if (!this.config) this.config = { descuentoMaxPct: 10 };
+    // 2. Render inmediato + enganchar listener
+    this.render();
+    this.engancharRTDB();
     this.startTicker();
+    // 3. Background: refrescar config + sincronizar RTDB
+    this.refrescarConfigBg();
+    this.sincronizarVistaBg();
   },
 
 async cargarInicial() {
-    startLoading();
+    // Compat — abrir() ya orquesta todo en background.
+    this.refrescarConfigBg();
+    this.sincronizarVistaBg();
+  },
+
+  async refrescarConfigBg() {
     try {
-      // Fase 4: leer descuento máximo desde CONFIGURACION
-      let descMax = 10;
-      try {
-        const cfg = await apiGet('getConfig', {});
-        descMax = Number(cfg.CAJA_DESCUENTO_MAX_PCT) || 10;
-      } catch (_) { /* fallback al default */ }
-      this.config = { descuentoMaxPct: descMax };
-      await apiPost('sincronizarVistaCaja', withUser({}));
-    } catch (e) {
-      alertErr('Error al cargar caja', e.message);
-    } finally {
-      stopLoading();
-    }
+      const cfg = await apiGet('getConfig', {});
+      const fresh = { descuentoMaxPct: Number(cfg.CAJA_DESCUENTO_MAX_PCT) || 10 };
+      if (JSON.stringify(fresh) !== JSON.stringify(this.config)) {
+        this.config = fresh;
+        localStorage.setItem('rg.cajaConfig', JSON.stringify(fresh));
+      }
+    } catch (_) { /* mantenemos config previa */ }
+  },
+
+  sincronizarVistaBg() {
+    const KEY = 'rg.sync.caja';
+    const last = Number(localStorage.getItem(KEY) || 0);
+    if (Date.now() - last < 30 * 1000) return;
+    localStorage.setItem(KEY, String(Date.now()));
+    apiPost('sincronizarVistaCaja', withUser({})).catch(e => {
+      localStorage.removeItem(KEY);
+      console.error('sincronizarVistaCaja:', e);
+    });
   },
 
   async engancharRTDB() {
