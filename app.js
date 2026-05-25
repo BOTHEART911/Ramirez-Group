@@ -2241,29 +2241,16 @@ abrirPedidoExistente(pedidoId, mesaId) {
   /* ────────────────────────────────────────────
      MODAL DE PRODUCTO (cantidad + mods + nota)
      ──────────────────────────────────────────── */
-  abrirModalProducto(producto, initial) {
-    // Fase 4D — `initial` opcional: { cantidad, modificadores, descripcion, itemId }
-    // Si viene, el modal arranca en modo edición (precargado + título "Editar").
+ abrirModalProducto(producto) {
     const grupos = (this.catalogo.modificadores[producto.id] || []);
     const self = this;
-    const esEdicion = !!(initial && initial.itemId);
-    // Set rápido de "grupo|opcion" -> true para marcar las opciones preseleccionadas
-    const seleccionPrev = {};
-    if (initial && initial.modificadores) {
-      initial.modificadores.forEach(m => {
-        seleccionPrev[String(m.grupo) + '|' + String(m.opcion)] = true;
-      });
-    }
 
     const gruposHTML = grupos.map((g, gi) => {
       const isUnica = String(g.tipoSeleccion || 'UNICA').toUpperCase() === 'UNICA';
       const opsHTML = g.opciones.map((o, oi) => {
         const type = isUnica ? 'radio' : 'checkbox';
         const name = isUnica ? `mp-g-${gi}` : `mp-g-${gi}-${oi}`;
-        // Si estamos en edición, marcar las opciones que el ítem ya tenía
-        const preMarcado = seleccionPrev[String(g.grupo) + '|' + String(o.opcion)];
-        const defaultMark = (isUnica && g.obligatorio && oi === 0 && !esEdicion);
-        const checked = (preMarcado || defaultMark) ? 'checked' : '';
+        const checked = (isUnica && g.obligatorio && oi === 0) ? 'checked' : '';
         const delta = Number(o.precioDelta) || 0;
         const deltaStr = delta === 0 ? '' :
           (delta > 0 ? `+${fmtPesos(delta)}` : `${fmtPesos(delta)}`);
