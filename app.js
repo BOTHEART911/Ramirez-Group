@@ -2255,8 +2255,23 @@ abrirModalProducto(producto, initial) {
       });
     }
 
+    // Visibilidad condicional (caso desayunos): si el producto tiene una opción
+    // "Solo caldo", los grupos cuyo nombre contenga "bandeja" se ocultan al
+    // marcarla. Genérico: si el producto no encaja, los índices quedan en -1
+    // y el modal se comporta como siempre.
+    const grupoCtlIdx = grupos.findIndex(g =>
+      (g.opciones || []).some(o => String(o.opcion || '').toLowerCase().trim() === 'solo caldo')
+    );
+    const opcionSoloCaldoIdx = grupoCtlIdx >= 0
+      ? grupos[grupoCtlIdx].opciones.findIndex(o =>
+          String(o.opcion || '').toLowerCase().trim() === 'solo caldo')
+      : -1;
+    const esGrupoDep = (g) => /bandeja/i.test(String(g.nombreGrupo || g.grupo || ''));
+
     const gruposHTML = grupos.map((g, gi) => {
       const isUnica = String(g.tipoSeleccion || 'UNICA').toUpperCase() === 'UNICA';
+      const esCtl = (gi === grupoCtlIdx);
+      const esDep = esGrupoDep(g);
       const opsHTML = g.opciones.map((o, oi) => {
         const type = isUnica ? 'radio' : 'checkbox';
         const name = isUnica ? `mp-g-${gi}` : `mp-g-${gi}-${oi}`;
@@ -2267,18 +2282,22 @@ abrirModalProducto(producto, initial) {
         const delta = Number(o.precioDelta) || 0;
         const deltaStr = delta === 0 ? '' :
           (delta > 0 ? `+${fmtPesos(delta)}` : `${fmtPesos(delta)}`);
+        const soloCaldoAttr = (esCtl && oi === opcionSoloCaldoIdx) ? ' data-mp-solo-caldo="1"' : '';
         return `
           <label class="mp-opt">
             <input type="${type}" name="${name}" value="${oi}"
                    data-mp-grupo="${gi}" data-mp-opcion="${oi}"
-                   data-mp-delta="${delta}" ${checked} />
+                   data-mp-delta="${delta}"${soloCaldoAttr} ${checked} />
             <span class="mp-opt__name">${escapeHtml(o.opcion)}</span>
             ${deltaStr ? `<span class="mp-opt__delta">${deltaStr}</span>` : ''}
           </label>
         `;
       }).join('');
+      const dataAttrs = `data-mp-grupo-idx="${gi}"` +
+        (esCtl ? ' data-mp-grupo-ctl="1"' : '') +
+        (esDep ? ' data-mp-grupo-dep="1"' : '');
       return `
-        <div class="mp-grupo">
+        <div class="mp-grupo" ${dataAttrs}>
           <div class="mp-grupo__head">
             <strong>${escapeHtml(g.nombreGrupo || g.grupo)}</strong>
             ${g.obligatorio ? `<span class="mp-tag mp-tag--oblig">Obligatorio</span>` : ''}
@@ -2333,10 +2352,26 @@ abrirModalProducto(producto, initial) {
           const cant = Math.max(1, Number($('#mp-cantidad').value) || 1);
           let delta = 0;
           $$('input[data-mp-delta]:checked').forEach(el => {
+            // Ignorar deltas de grupos ocultos (dependientes de "Solo caldo")
+            const grupoEl = el.closest('.mp-grupo');
+            if (grupoEl && grupoEl.classList.contains('hidden')) return;
             delta += Number(el.dataset.mpDelta) || 0;
           });
           const total = (Number(producto.precioBase) + delta) * cant;
           $('#mp-total').textContent = fmtPesos(total);
+        };
+        // Mostrar/ocultar grupos dependientes según "Solo caldo"
+        const toggleDeps = () => {
+          if (grupoCtlIdx < 0) return;
+          const soloCaldoMarcado = !!document.querySelector('input[data-mp-solo-caldo="1"]:checked');
+          $$('.mp-grupo[data-mp-grupo-dep="1"]').forEach(el => {
+            el.classList.toggle('hidden', soloCaldoMarcado);
+            if (soloCaldoMarcado) {
+              // Limpiar selección de bandeja al volver a "Solo caldo"
+              $$('input[data-mp-delta]', el).forEach(inp => { inp.checked = false; });
+            }
+          });
+          recalc();
         };
         $$('[data-mp-qty]').forEach(b => {
           b.addEventListener('click', () => {
@@ -2349,12 +2384,21 @@ abrirModalProducto(producto, initial) {
         });
         $('#mp-cantidad').addEventListener('input', recalc);
         $$('input[data-mp-delta]').forEach(el => el.addEventListener('change', recalc));
-        recalc();
+        if (grupoCtlIdx >= 0) {
+          $$(`input[data-mp-grupo="${grupoCtlIdx}"]`).forEach(el =>
+            el.addEventListener('change', toggleDeps));
+          toggleDeps(); // estado inicial (cubre edición con "Solo caldo" preseleccionado)
+        } else {
+          recalc();
+        }
       },
       preConfirm: () => {
         const seleccion = [];
         for (let gi = 0; gi < grupos.length; gi++) {
           const g = grupos[gi];
+          // Saltar grupos dependientes ocultos (caso "Solo caldo")
+          const grupoEl = document.querySelector(`.mp-grupo[data-mp-grupo-idx="${gi}"]`);
+          if (grupoEl && grupoEl.classList.contains('hidden')) continue;
           const checks = $$(`input[data-mp-grupo="${gi}"]:checked`);
           if (g.obligatorio && !checks.length) {
             Swal.showValidationMessage(`Selecciona una opción en "${g.nombreGrupo || g.grupo}"`);
@@ -2552,20 +2596,16 @@ abrirModalProducto(producto, initial) {
       });
       if (!r.isConfirmed) return;
       motivo = r.value;
-    } else {
-      const ok = await confirmar('Quitar ítem',
-        `¿Quitar <b>${escapeHtml(it.nombre)}</b> del pedido?`, 'Sí, quitar');
-      if (!ok) return;
-    }
+   }
+    // Sin confirmar previo si no requiere motivo: tap único → optimistic UI.
+    // El ítem queda tachado en pantalla, ese es el feedback.
 
-    // Optimista: marcar cancelado localmente → render → POST en background
     this.optimistas[itemId] = { cancelado: true };
     this.renderDetalle();
-    Toast && Toast.fire({ icon: 'success', title: 'Ítem cancelado' });
 
     try {
       await apiPost('cancelarItem', withUser({ itemId, motivo }));
-      // El listener RTDB confirma y limpia el override
+       // El listener RTDB confirma y limpia el override
     } catch (e) {
       delete this.optimistas[itemId];
       this.renderDetalle();
