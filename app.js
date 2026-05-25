@@ -27,7 +27,7 @@ const firebaseConfig = {
 /* ============================================================
    CONSTANTES GENERALES
    ============================================================ */
-const APP_VERSION = '2026.05.25.3'; // se sobreescribe al leer version.json
+const APP_VERSION = '2026.05.25.4'; // se sobreescribe al leer version.json
 const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
@@ -254,6 +254,8 @@ function iniciarSesion() {
   if (saved) {
     try {
       state.user = JSON.parse(saved);
+      // Fase 5 / Bloque G — suscribir config también al re-abrir la app
+      try { Config.subscribeRTDB(NEGOCIO_RESTAURANTE_ID); } catch (_) {}
       irAInicio();
       return;
     } catch (_) {}
@@ -381,10 +383,16 @@ function procesarLoginExitoso(user) {
   localStorage.setItem(SESSION_KEY, JSON.stringify(user));
   playSoundOnce(SOUNDS.login);
   stopLoading();
+  // Fase 5 / Bloque G — Suscribirse al config global vía RTDB.
+  // Otros dispositivos reciben los cambios sin esperar el TTL local.
+  try { Config.subscribeRTDB(NEGOCIO_RESTAURANTE_ID); } catch (_) {}
   irAInicio();
 }
 
 function logout() {
+  // Fase 5 / Bloque G — Desuscribir listener de config antes de cerrar
+  try { Config.unsubscribeRTDB(); } catch (_) {}
+  Config.invalidate();
   localStorage.removeItem(SESSION_KEY);
   state.user = null;
   state.negocioActual = null;
@@ -2716,6 +2724,9 @@ const Comanda = {
   optimistas: {},     // { itemId: 'PREPARANDO' | 'LISTO' } — estados forzados localmente
   _ref: null,
   _tickInterval: null,
+  _unsubConfig: null,
+  _warnMin: 15,       // defaults por si Config aún no cargó
+  _lateMin: 25,
 
 async abrir() {
     showView('comanda');
@@ -2723,8 +2734,19 @@ async abrir() {
     this.render();
     this.engancharRTDB();
     this.startTicker();
+    // Fase 5 / Bloque G — leer umbrales del config + escuchar cambios en vivo
+    this._aplicarConfig(await Config.get().catch(() => ({})));
+    this._unsubConfig = Config.on((cfg) => this._aplicarConfig(cfg));
     // Sincronización del RTDB en background con throttle 30s
     this.sincronizarVistaBg();
+  },
+
+  _aplicarConfig(cfg) {
+    this._warnMin = Number(cfg.COCINA_WARN_MIN) || 15;
+    this._lateMin = Number(cfg.COCINA_LATE_MIN) || 25;
+    // Repintar cronos si la vista está activa
+    const view = $('#view-comanda');
+    if (view && view.classList.contains('active')) this.tickCronos();
   },
 
 async cargarInicial() {
@@ -2888,25 +2910,26 @@ async cargarInicial() {
     `;
   },
 
-  tickCronos() {
+tickCronos() {
     const view = $('#view-comanda');
     if (!view || !view.classList.contains('active')) return;
     const now = Date.now();
+    const warnMin = this._warnMin;
+    const lateMin = this._lateMin;
     $$('[data-crono-from]', view).forEach(el => {
       const iso = el.dataset.cronoFrom;
       if (!iso) { el.textContent = '—'; return; }
-      // El backend manda "yyyy-MM-dd HH:mm:ss" en zona Bogotá, sin TZ. Lo
-      // parseamos como local porque coincide con la zona del navegador
-      // (los meseros y la cocina están en el mismo lugar físico).
+      // "yyyy-MM-dd HH:mm:ss" en zona Bogotá, parseado como local porque
+      // el equipo está en la misma zona física.
       const ts = Date.parse(iso.replace(' ', 'T'));
       if (isNaN(ts)) { el.textContent = '—'; return; }
       const secs = Math.max(0, Math.floor((now - ts) / 1000));
       const m = Math.floor(secs / 60);
       const s = secs % 60;
       el.textContent = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
-      // Clases de alerta según minutos
-      el.classList.toggle('is-warn',  m >= 15 && m < 25);
-      el.classList.toggle('is-late',  m >= 25);
+      // Fase 5 / Bloque G — umbrales desde config
+      el.classList.toggle('is-warn',  m >= warnMin && m < lateMin);
+      el.classList.toggle('is-late',  m >= lateMin);
     });
   },
 
@@ -2928,12 +2951,13 @@ async cargarInicial() {
     }
   },
 
-  desenganchar() {
+desenganchar() {
     if (this._ref) {
       this._ref.off();
       this._ref = null;
     }
     this.stopTicker();
+    if (this._unsubConfig) { this._unsubConfig(); this._unsubConfig = null; }
   },
 
   setupListeners() { /* nada por ahora */ }
@@ -2947,44 +2971,39 @@ async cargarInicial() {
    ============================================================ */
 const Caja = {
   pedidos: {},        // { pedidoId: {mesaNumero, total, ...} }
-  config: null,       // CAJA_DESCUENTO_MAX_PCT, etc.
+  config: { descuentoMaxPct: 10, propinaSugeridaPct: 10, warnMin: 3, lateMin: 7 },
   _ref: null,
   _tickInterval: null,
+  _unsubConfig: null,
 
   async abrir() {
     showView('caja');
-    // 1. Hidratar config desde cache local
-    if (!this.config) {
-      const cached = localStorage.getItem('rg.cajaConfig');
-      if (cached) {
-        try { this.config = JSON.parse(cached); } catch (_) {}
-      }
-    }
-    if (!this.config) this.config = { descuentoMaxPct: 10 };
-    // 2. Render inmediato + enganchar listener
+    // Fase 5 / Bloque G — leer del Config global (5 min TTL, broadcast RTDB)
+    this._aplicarConfig(await Config.get().catch(() => ({})));
+    this._unsubConfig = Config.on((cfg) => this._aplicarConfig(cfg));
+    // Render inmediato + enganchar listener
     this.render();
     this.engancharRTDB();
     this.startTicker();
-    // 3. Background: refrescar config + sincronizar RTDB
-    this.refrescarConfigBg();
+    // Background sync con throttle 30s
     this.sincronizarVistaBg();
   },
 
 async cargarInicial() {
     // Compat — abrir() ya orquesta todo en background.
-    this.refrescarConfigBg();
     this.sincronizarVistaBg();
   },
 
-  async refrescarConfigBg() {
-    try {
-      const cfg = await apiGet('getConfig', {});
-      const fresh = { descuentoMaxPct: Number(cfg.CAJA_DESCUENTO_MAX_PCT) || 10 };
-      if (JSON.stringify(fresh) !== JSON.stringify(this.config)) {
-        this.config = fresh;
-        localStorage.setItem('rg.cajaConfig', JSON.stringify(fresh));
-      }
-    } catch (_) { /* mantenemos config previa */ }
+  _aplicarConfig(cfg) {
+    this.config = {
+      descuentoMaxPct:    Number(cfg.CAJA_DESCUENTO_MAX_PCT) || 10,
+      propinaSugeridaPct: Number(cfg.PROPINA_SUGERIDA_PCT)   || 10,
+      warnMin:            Number(cfg.CAJA_WARN_MIN)          || 3,
+      lateMin:            Number(cfg.CAJA_LATE_MIN)          || 7
+    };
+    // Repintar cronos si la vista está activa
+    const view = $('#view-caja');
+    if (view && view.classList.contains('active')) this.tickEsperas();
   },
 
   sincronizarVistaBg() {
@@ -3021,9 +3040,10 @@ async cargarInicial() {
     this._tickInterval = setInterval(() => this.tickEsperas(), 1000);
   },
 
-  desenganchar() {
+desenganchar() {
     if (this._ref) { this._ref.off(); this._ref = null; }
     if (this._tickInterval) { clearInterval(this._tickInterval); this._tickInterval = null; }
+    if (this._unsubConfig) { this._unsubConfig(); this._unsubConfig = null; }
   },
 
   render() {
@@ -3097,10 +3117,12 @@ async cargarInicial() {
     `;
   },
 
-  tickEsperas() {
+tickEsperas() {
     const view = $('#view-caja');
     if (!view || !view.classList.contains('active')) return;
     const now = Date.now();
+    const warnMin = this.config.warnMin;
+    const lateMin = this.config.lateMin;
     $$('[data-espera-from]', view).forEach(el => {
       const iso = el.dataset.esperaFrom;
       const ts = Date.parse(iso.replace(' ', 'T'));
@@ -3109,8 +3131,8 @@ async cargarInicial() {
       const m = Math.floor(secs / 60);
       const s = secs % 60;
       el.textContent = '⏱ ' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
-      el.classList.toggle('is-warn', m >= 3 && m < 7);
-      el.classList.toggle('is-late', m >= 7);
+      el.classList.toggle('is-warn', m >= warnMin && m < lateMin);
+      el.classList.toggle('is-late', m >= lateMin);
     });
   },
 
@@ -3120,13 +3142,17 @@ async cargarInicial() {
   async abrirModalCobro(pedidoId) {
     const p = this.pedidos[pedidoId];
     if (!p) return;
- // Estado interno del modal
+     
+// Estado interno del modal
+    const propinaPct = this.config.propinaSugeridaPct;
+    const subtotalNum = Number(p.subtotal) || 0;
+    const totalNum    = Number(p.total)    || 0;
     const st = {
       pedidoId,
-      subtotal:       Number(p.subtotal) || 0,
+      subtotal:       subtotalNum,
       descuentoPct:   0,
       descuentoValor: 0,
-      total:          Number(p.total)    || 0,
+      total:          totalNum,
       metodo:         'EFECTIVO',
       montoEfectivo:  0,
       montoTransfer:  0,
@@ -3136,10 +3162,13 @@ async cargarInicial() {
       esGenerico:        true,
       clienteNombre:     '',
       clienteTelefono:   '',
-      clienteIdExistente: null,  // se llena si el lookup encuentra match
+      clienteIdExistente: null,
       // Fase 4 — ticket bajo demanda
       ticketUrl:         null,
-      ticketGenerando:   false
+      ticketGenerando:   false,
+      // Fase 5 / Bloque G — propina sugerida (informativa, no se cobra)
+      propinaSugeridaPct: propinaPct,
+      propinaSugerida:    Math.round(totalNum * propinaPct / 100)
     };
     st.descuentoMaxPct = this.config.descuentoMaxPct;
 
@@ -3207,12 +3236,15 @@ htmlModalCobro(p, st) {
             <span id="cb-desc-val">$ 0</span>
           </div>
           <div class="cobro__row cobro__row--total">
-            <span>TOTAL</span>
-            <span id="cb-total">${fmtPesos(st.total)}</span>
-          </div>
+          <span>TOTAL</span>
+          <span id="cb-total">${fmtPesos(st.total)}</span>
         </div>
+        <div class="cobro__propina" id="cb-propina-hint">
+          💡 Propina sugerida (${st.propinaSugeridaPct}%): <b id="cb-propina-val">${fmtPesos(st.propinaSugerida)}</b>
+        </div>
+      </div>
 
-        <label>Método de pago</label>
+      <label>Método de pago</label>
         <div class="cobro__metodos">
           <button type="button" class="cobro__metodo is-active" data-metodo="EFECTIVO">
             💵 Efectivo
@@ -3375,9 +3407,13 @@ bindModalCobro(p, st) {
         e.target.value = pct;
         Toast && Toast.fire({ icon: 'warning', title: `Máximo ${tope}%` });
       }
-      st.descuentoPct   = pct;
+ st.descuentoPct   = pct;
       st.descuentoValor = Math.round(st.subtotal * pct / 100);
       st.total          = st.subtotal - st.descuentoValor;
+      // Fase 5 / Bloque G — recalcular propina sugerida sobre el nuevo total
+      st.propinaSugerida = Math.round(st.total * st.propinaSugeridaPct / 100);
+      const propVal = $('#cb-propina-val');
+      if (propVal) propVal.textContent = fmtPesos(st.propinaSugerida);
       upd();
     });
 
@@ -4424,6 +4460,9 @@ const Config = {
   _CACHE_KEY: 'rg.config',
   _TTL_MS: 5 * 60 * 1000,
   _inflight: null,
+  _listeners: [],         // callbacks notificados al cambiar el config
+  _rtdbRef: null,         // ref Firebase activa
+  _primeraVezRtdb: true,  // para no notificar en el snapshot inicial
 
   async get() {
     const cached = this._readCache();
@@ -4447,6 +4486,56 @@ const Config = {
 
   invalidate() {
     try { localStorage.removeItem(this._CACHE_KEY); } catch (_) {}
+  },
+
+  /* Suscripción imperativa: callback recibe el config actualizado.
+     Devuelve función para desuscribir. */
+  on(callback) {
+    this._listeners.push(callback);
+    return () => {
+      this._listeners = this._listeners.filter(c => c !== callback);
+    };
+  },
+
+  _notify(cfg) {
+    this._listeners.forEach(cb => {
+      try { cb(cfg); } catch (e) { console.error('Config listener error:', e); }
+    });
+  },
+
+  /* Listener global RTDB. Se monta tras login y se mantiene hasta
+     logout. Cualquier `setConfig` en otro dispositivo dispara este
+     callback, invalida cache y notifica a los listeners locales. */
+  async subscribeRTDB(negocioId) {
+    if (this._rtdbRef) return;
+    const fb = await getFirebase();
+    if (!fb) return;
+    this._primeraVezRtdb = true;
+    this._rtdbRef = fb.database().ref('/negocios/' + negocioId + '/config');
+    this._rtdbRef.on('value', (snap) => {
+      const data = snap.val();
+      if (!data) return;
+      if (this._primeraVezRtdb) {
+        // Snapshot inicial: si no hay cache, lo seedeamos. Si hay cache
+        // fresco (TTL no expirado), lo respetamos por consistencia.
+        this._primeraVezRtdb = false;
+        if (!this._readCache()) this._writeCache(data);
+        return;
+      }
+      // Cambio: invalidar, persistir y notificar
+      this._writeCache(data);
+      this._notify(data);
+    }, (err) => {
+      console.error('RTDB config listener:', err);
+    });
+  },
+
+  unsubscribeRTDB() {
+    if (this._rtdbRef) {
+      this._rtdbRef.off();
+      this._rtdbRef = null;
+      this._primeraVezRtdb = true;
+    }
   },
 
   _readCache() {
