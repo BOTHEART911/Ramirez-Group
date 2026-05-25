@@ -27,7 +27,7 @@ const firebaseConfig = {
 /* ============================================================
    CONSTANTES GENERALES
    ============================================================ */
-const APP_VERSION = '2026.05.25.1'; // se sobreescribe al leer version.json
+const APP_VERSION = '2026.05.25.2'; // se sobreescribe al leer version.json
 const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
@@ -523,8 +523,8 @@ function irAMenuRestaurante() {
     {
       key: 'usuarios', titulo: 'Usuarios', desc: 'Gestionar equipo',
       icono: ICONOS.mesero,
-      roles: ['SUPERUSUARIO','ADMINISTRADOR'],
-      view: 'pendiente', placeholder: 'Gestión de usuarios'
+      roles: ['SUPERUSUARIO'],
+      view: 'usuarios'
     },
     {
       key: 'auditoria', titulo: 'Auditoría', desc: 'Registro de acciones',
@@ -572,6 +572,8 @@ function irAMenuRestaurante() {
         Caja.abrir();
       } else if (t.view === 'anclaje') {
         Anclaje.abrir();
+      } else if (t.view === 'usuarios') {
+        Usuarios.abrir();
       } else {
         showView(t.view);
       }
@@ -599,9 +601,10 @@ document.addEventListener('click', (e) => {
     if (!t) return;
     const dest = t.dataset.go;
     // Si veníamos de Comanda, desenganchar listener + cronómetro
-    if (typeof Comanda !== 'undefined') Comanda.desenganchar();
+   if (typeof Comanda !== 'undefined') Comanda.desenganchar();
     if (typeof Caja    !== 'undefined') Caja.desenganchar();
     if (typeof Anclaje !== 'undefined') Anclaje.desenganchar();
+    if (typeof Usuarios !== 'undefined') Usuarios.desenganchar();
     if (dest === 'inicio') irAInicio();
     else if (dest === 'restaurante') irAMenuRestaurante();
     else showView(dest);
@@ -4051,9 +4054,359 @@ const Anclaje = {
     }
   },
 
-  desenganchar() { this.stopAutoRefresh(); },
+desenganchar() { this.stopAutoRefresh(); },
 
   setupListeners() { /* nada por ahora */ }
+};
+
+/* ============================================================
+   ============================================================
+   FASE 5 / BLOQUE E — USUARIOS (gestión de equipo)
+   Solo SUPERUSUARIO. Lista + buscar + crear + editar + eliminar.
+   ============================================================
+   ============================================================ */
+const Usuarios = {
+  usuarios: [],
+  negocios: [],
+  filtroTexto: '',
+
+  ROLES: ['SUPERUSUARIO','ADMINISTRADOR','CONTADOR','MESERO','COCINA','CAJA'],
+
+  async abrir() {
+    showView('usuarios');
+    await this.cargar();
+  },
+
+  async cargar() {
+    startLoading();
+    try {
+      const [users, negs] = await Promise.all([
+        apiPost('listUsuarios', withUser({})),
+        apiGet('listNegocios')
+      ]);
+      this.usuarios = users || [];
+      this.negocios = negs || [];
+      this.render();
+    } catch (e) {
+      alertErr('Error al cargar usuarios', e.message);
+    } finally {
+      stopLoading();
+    }
+  },
+
+  render() {
+    const cont = $('#usr-content');
+    if (!cont) return;
+    const sub = $('#usr-subtitle');
+
+    const filtro = this.filtroTexto.trim().toLowerCase();
+    const visibles = this.usuarios
+      .filter(u => {
+        if (!filtro) return true;
+        return [u.nombre, u.documento, u.telefono, u.rol]
+          .map(x => String(x || '').toLowerCase())
+          .some(x => x.indexOf(filtro) >= 0);
+      })
+      .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es'));
+
+    if (sub) {
+      const total = this.usuarios.length;
+      const txt = filtro
+        ? `${visibles.length} de ${total} usuario${total === 1 ? '' : 's'}`
+        : `${total} usuario${total === 1 ? '' : 's'} registrado${total === 1 ? '' : 's'}`;
+      sub.textContent = txt;
+    }
+
+    if (!visibles.length) {
+      cont.innerHTML = `
+        <div class="card text-center" style="margin-top:16px;">
+          <h3>${filtro ? 'Sin resultados' : 'Sin usuarios'}</h3>
+          <p class="muted">${filtro ? 'Nadie coincide con tu búsqueda.' : 'Toca <b>+</b> para crear el primer usuario.'}</p>
+        </div>`;
+      return;
+    }
+
+    cont.innerHTML = visibles.map(u => this.renderTarjeta(u)).join('');
+    $$('[data-usr-edit]', cont).forEach(el => {
+      el.addEventListener('click', () => {
+        const u = this.usuarios.find(x => x.id === el.dataset.usrEdit);
+        if (u) this.abrirModal(u);
+      });
+    });
+  },
+
+  renderTarjeta(u) {
+    const iniciales = this.iniciales(u.nombre);
+    const rolKey = String(u.rol).toLowerCase();
+    const negociosTags = (u.negocios || []).map(id => {
+      const n = this.negocios.find(x => x.id === id);
+      const label = n ? (n.tipo || n.nombre || id) : id;
+      return `<span class="usr-tag">${escapeHtml(label)}</span>`;
+    }).join('');
+    return `
+      <article class="usr-card" data-usr-edit="${u.id}">
+        <div class="usr-card__avatar usr-card__avatar--${rolKey}">${escapeHtml(iniciales)}</div>
+        <div class="usr-card__body">
+          <div class="usr-card__head">
+            <h4 class="usr-card__name">${escapeHtml(u.nombre)}</h4>
+            <span class="usr-chip usr-chip--${rolKey}">${escapeHtml(u.rol)}</span>
+          </div>
+          <div class="usr-card__meta">
+            <span>Doc: <b>${escapeHtml(u.documento)}</b></span>
+            <span>·</span>
+            <span>Tel: <b>${escapeHtml(this.fmtTel(u.telefono))}</b></span>
+          </div>
+          ${negociosTags ? `<div class="usr-card__tags">${negociosTags}</div>` : ''}
+          ${u.ultimoLogin ? `<div class="usr-card__last">Último login: ${escapeHtml(fmtFechaCorta(u.ultimoLogin))}</div>` : ''}
+        </div>
+      </article>
+    `;
+  },
+
+  iniciales(nombre) {
+    const partes = String(nombre || '?').trim().split(/\s+/);
+    if (!partes.length) return '?';
+    if (partes.length === 1) return partes[0].charAt(0).toUpperCase();
+    return (partes[0].charAt(0) + partes[1].charAt(0)).toUpperCase();
+  },
+
+  fmtTel(t) {
+    const s = String(t || '');
+    if (s.length !== 10) return s;
+    return s.slice(0, 3) + ' ' + s.slice(3, 6) + ' ' + s.slice(6);
+  },
+
+  abrirModal(usuario) {
+    const isNew = !usuario;
+    const u = usuario || {
+      id: '', nombre: '', documento: '', telefono: '',
+      rol: 'MESERO', pin: '', negocios: [], email: ''
+    };
+    const self = this;
+    const esYoMismo = !isNew && String(u.id) === String(state.user?.id);
+
+    const optsRoles = this.ROLES.map(r =>
+      `<option value="${r}" ${r === u.rol ? 'selected' : ''}>${r}</option>`
+    ).join('');
+
+    const negsHtml = this.negocios.length
+      ? this.negocios.map(n => {
+          const checked = (u.negocios || []).indexOf(n.id) >= 0 ? 'checked' : '';
+          return `
+            <label class="usr-negocio-opt">
+              <input type="checkbox" data-usr-neg="${n.id}" ${checked} />
+              <span>${escapeHtml(n.nombre)}</span>
+            </label>`;
+        }).join('')
+      : `<p class="muted" style="font-size:0.82rem;">No hay negocios activos.</p>`;
+
+    // PIN: en CREACIÓN visible siempre. En EDICIÓN oculto con toggle.
+    const pinHtml = isNew
+      ? `<input id="u-pin" type="text" maxlength="4" inputmode="numeric"
+             placeholder="4 dígitos" value="" />`
+      : `<div class="usr-pin-row">
+           <input id="u-pin" type="password" maxlength="4" inputmode="numeric"
+                  value="${escapeHtml(u.pin)}" />
+           <button type="button" id="u-pin-toggle" class="usr-pin-toggle"
+                   title="Mostrar / ocultar PIN">👁</button>
+         </div>`;
+
+    const html = `
+      <div class="usr-modal">
+        <div class="usr-modal__avatar usr-card__avatar--${String(u.rol || 'MESERO').toLowerCase()}">
+          ${escapeHtml(this.iniciales(u.nombre || '?'))}
+        </div>
+
+        <label>Nombre completo</label>
+        <input id="u-nombre" type="text" value="${escapeHtml(u.nombre)}"
+               placeholder="Ej: JUAN PÉREZ TORRES" maxlength="80" />
+
+        <div class="grid-2">
+          <div>
+            <label>Documento</label>
+            <input id="u-documento" type="tel" inputmode="numeric" maxlength="10"
+                   value="${escapeHtml(u.documento)}" placeholder="1234567890" />
+          </div>
+          <div>
+            <label>Teléfono (cel. CO)</label>
+            <input id="u-telefono" type="tel" inputmode="numeric" maxlength="10"
+                   value="${escapeHtml(u.telefono)}" placeholder="3001234567" />
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div>
+            <label>Rol</label>
+            <select id="u-rol" ${esYoMismo ? 'data-yo-mismo="1"' : ''}>
+              ${optsRoles}
+            </select>
+          </div>
+          <div>
+            <label>PIN (4 dígitos)</label>
+            ${pinHtml}
+          </div>
+        </div>
+
+        <label>Negocios asignados</label>
+        <div class="usr-negocios">${negsHtml}</div>
+
+        <label>Email (opcional)</label>
+        <input id="u-email" type="email" value="${escapeHtml(u.email)}"
+               placeholder="usuario@ejemplo.com" />
+
+        ${esYoMismo ? `
+          <p class="muted" style="font-size:0.74rem; margin-top:10px;">
+            ⚠️ Estás editando tu propio usuario. No puedes cambiar tu rol fuera de SUPERUSUARIO ni eliminarte.
+          </p>` : ''}
+      </div>
+    `;
+
+    Swal.fire({
+      title: isNew ? 'Nuevo usuario' : 'Editar usuario',
+      html,
+      width: 560,
+      showCancelButton: true,
+      confirmButtonText: isNew ? 'Crear' : 'Guardar',
+      cancelButtonText: 'Cancelar',
+      showDenyButton: !isNew && !esYoMismo,
+      denyButtonText: 'Eliminar',
+      reverseButtons: true,
+      focusConfirm: false,
+      didOpen: () => {
+        const toggle = $('#u-pin-toggle');
+        if (toggle) {
+          toggle.addEventListener('click', () => {
+            const inp = $('#u-pin');
+            inp.type = inp.type === 'password' ? 'text' : 'password';
+            toggle.textContent = inp.type === 'password' ? '👁' : '🙈';
+          });
+        }
+        // Sanitizar inputs numéricos en vivo
+        ['u-documento','u-telefono','u-pin'].forEach(id => {
+          const el = $('#' + id);
+          if (el) el.addEventListener('input', () => {
+            el.value = el.value.replace(/\D/g, '');
+          });
+        });
+      },
+      preConfirm: () => {
+        const datos = {
+          nombre:    $('#u-nombre').value.trim().toUpperCase(),
+          documento: $('#u-documento').value.trim(),
+          telefono:  $('#u-telefono').value.trim(),
+          rol:       $('#u-rol').value,
+          pin:       $('#u-pin').value.trim(),
+          email:     $('#u-email').value.trim(),
+          negocios:  $$('[data-usr-neg]:checked').map(el => el.dataset.usrNeg)
+        };
+        const err = self.validarLocal(datos, isNew ? null : u.id);
+        if (err) { Swal.showValidationMessage(err); return false; }
+        return datos;
+      }
+    }).then(async (res) => {
+      if (res.isDenied) {
+        const ok = await confirmar('Eliminar usuario',
+          `¿Eliminar a <b>${escapeHtml(u.nombre)}</b>? Esta acción es irreversible.`,
+          'Sí, eliminar');
+        if (ok) await self.eliminar(u);
+      } else if (res.isConfirmed) {
+        await self.guardar(res.value, isNew ? null : u.id);
+      }
+    });
+  },
+
+  validarLocal(d, idEditando) {
+    if (!d.nombre || d.nombre.length < 3) return 'Nombre debe tener al menos 3 caracteres';
+    if (!/^\d{6,10}$/.test(d.documento)) return 'Documento debe tener entre 6 y 10 dígitos';
+    if (!/^3\d{9}$/.test(d.telefono)) return 'Teléfono debe ser celular Colombia (10 dígitos, inicia en 3)';
+    if (!/^\d{4}$/.test(d.pin)) return 'PIN debe tener exactamente 4 dígitos';
+    if (this.ROLES.indexOf(d.rol) < 0) return 'Selecciona un rol válido';
+    if (!d.negocios.length) return 'Selecciona al menos un negocio';
+    if (d.email && d.email.indexOf('@') < 0) return 'Email debe contener "@"';
+
+    // Auto-degradación
+    if (idEditando && String(idEditando) === String(state.user?.id) && d.rol !== 'SUPERUSUARIO') {
+      return 'No puedes cambiar tu propio rol fuera de SUPERUSUARIO';
+    }
+
+    // Unicidad local — el backend re-valida pero esto evita el round-trip
+    const otros = this.usuarios.filter(u => u.id !== idEditando);
+    if (otros.find(u => String(u.documento) === d.documento)) {
+      return 'Ya existe un usuario con el documento ' + d.documento;
+    }
+    if (otros.find(u => String(u.pin) === d.pin)) {
+      return 'El PIN ' + d.pin + ' ya está usado por otro usuario';
+    }
+    return null;
+  },
+
+  async guardar(datos, idEditando) {
+    startLoading();
+    try {
+      const body = {
+        nombre:    datos.nombre,
+        documento: datos.documento,
+        telefono:  datos.telefono,
+        rol:       datos.rol,
+        pin:       datos.pin,
+        email:     datos.email,
+        negocios:  datos.negocios
+      };
+      if (idEditando) body.id = idEditando;
+      await apiPost('upsertUsuario', withUser(body));
+      stopLoading();
+      Toast && Toast.fire({
+        icon: 'success',
+        title: idEditando ? 'Usuario actualizado' : 'Usuario creado'
+      });
+      await this.cargar();
+    } catch (e) {
+      stopLoading();
+      alertErr('Error al guardar', e.message);
+    }
+  },
+
+  async eliminar(u) {
+    startLoading();
+    try {
+      await apiPost('eliminarUsuario', withUser({ id: u.id }));
+      stopLoading();
+      Toast && Toast.fire({ icon: 'success', title: 'Usuario eliminado' });
+      await this.cargar();
+    } catch (e) {
+      stopLoading();
+      alertErr('No se pudo eliminar', e.message);
+    }
+  },
+
+  desenganchar() { /* sin listeners persistentes */ },
+
+  setupListeners() {
+    const fab = $('#usr-fab');
+    if (fab && !fab._bound) {
+      fab.addEventListener('click', () => this.abrirModal(null));
+      fab._bound = true;
+    }
+    const btn = $('#usr-search-btn');
+    const bar = $('#usr-search-bar');
+    const inp = $('#usr-search-input');
+    if (btn && !btn._bound) {
+      btn.addEventListener('click', () => {
+        bar.classList.toggle('hidden');
+        if (!bar.classList.contains('hidden')) inp.focus();
+        else { inp.value = ''; this.filtroTexto = ''; this.render(); }
+      });
+      btn._bound = true;
+    }
+    if (inp && !inp._bound) {
+      let t = null;
+      inp.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(() => { this.filtroTexto = inp.value; this.render(); }, 180);
+      });
+      inp._bound = true;
+    }
+  }
 };
 
 /* ============================================================
@@ -4075,6 +4428,7 @@ window.addEventListener('DOMContentLoaded', () => {
   Pedidos.setupListeners();
   Comanda.setupListeners();
   Caja.setupListeners();
-  // Fase 5
+ // Fase 5
   Anclaje.setupListeners();
+  Usuarios.setupListeners();
 });
