@@ -3453,3 +3453,22 @@ textarea { resize: vertical; min-height: 80px; }
   max-height: 240px;
   overflow-y: auto;
 }
+
+/* ============================================================
+   FASE 5 / BLOQUE G — Propina sugerida en modal de cobro
+   ============================================================ */
+.cobro__propina {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--accent-soft);
+  border: 1px dashed var(--accent);
+  border-radius: var(--r-sm);
+  font-size: 0.84rem;
+  color: var(--text-soft);
+  text-align: center;
+}
+.cobro__propina b {
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-weight: 800;
+}
