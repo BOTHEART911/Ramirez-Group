@@ -3314,3 +3314,142 @@ textarea { resize: vertical; min-height: 80px; }
   accent-color: var(--primary);
   flex-shrink: 0;
 }
+
+/* ============================================================
+   ============================================================
+   FASE 5 / BLOQUE F — VISTA CONFIGURACIÓN
+   ============================================================
+   ============================================================ */
+#cfg-content { padding-bottom: 60px; }
+
+.cfg-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  margin-bottom: 10px;
+  box-shadow: var(--sh-sm);
+}
+.cfg-section__head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  text-align: left;
+  background: var(--bg-card);
+  transition: background 0.15s;
+  cursor: pointer;
+}
+.cfg-section__head:hover { background: var(--bg-soft); }
+.cfg-section__title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--primary);
+  flex: 1;
+}
+.cfg-section__chevron {
+  color: var(--text-muted);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+.cfg-section.open .cfg-section__chevron { transform: rotate(180deg); }
+.cfg-section__body {
+  display: none;
+  padding: 14px 16px 16px;
+  border-top: 1px solid var(--border);
+}
+.cfg-section.open .cfg-section__body { display: block; }
+.cfg-section__foot {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cfg-sub {
+  font-family: var(--font-display);
+  font-size: 0.88rem;
+  color: var(--primary);
+  margin: 4px 0 6px;
+  letter-spacing: 0.3px;
+}
+
+.cfg-logo {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 12px;
+  margin-top: 4px;
+  align-items: start;
+}
+.cfg-logo img {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--r-md);
+  object-fit: cover;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+}
+.cfg-logo__right {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cfg-logo__right input {
+  margin: 0;
+}
+.cfg-logo__btn {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
+  border-radius: var(--r-sm);
+  font-weight: 700;
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  margin: 0 !important;
+  transition: background 0.15s, color 0.15s;
+}
+.cfg-logo__btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.cfg-template {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.cfg-template textarea {
+  font-family: 'IBM Plex Mono', 'Courier New', monospace;
+  font-size: 0.84rem;
+  white-space: pre;
+}
+.cfg-preview-label {
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.cfg-preview {
+  background: var(--bg-soft);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  font-family: 'IBM Plex Mono', 'Courier New', monospace;
+  font-size: 0.78rem;
+  color: var(--text-soft);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
