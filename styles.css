@@ -3183,6 +3183,10 @@ textarea { resize: vertical; min-height: 80px; }
   background: var(--bg-soft);
 }
 /* En el avatar grande del modal, dejamos un aro un poco más grueso */
+.usr-modal__avatar {
+  position: relative;
+  overflow: hidden;
+}
 .usr-modal__avatar .usr-card__avatar__img {
   top: 4px; left: 4px;
   width: calc(100% - 8px);
