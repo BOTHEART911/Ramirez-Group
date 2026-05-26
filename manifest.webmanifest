@@ -1,10 +1,10 @@
 {
-  "id": "/ramirez-group/",
+  "id": "/Ramirez-Group/",
   "name": "Ramírez Group",
   "short_name": "RamírezGroup",
   "description": "Sistema de gestión Restaurante y Pescadería Ramírez",
-  "start_url": "/ramirez-group/",
-  "scope": "/ramirez-group/",
+  "start_url": "/Ramirez-Group/",
+  "scope": "/Ramirez-Group/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#fefaf2",
