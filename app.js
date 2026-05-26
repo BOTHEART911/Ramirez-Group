@@ -541,11 +541,11 @@ function irAMenuRestaurante() {
       roles: ['SUPERUSUARIO'],
       view: 'usuarios'
     },
-    {
+   {
       key: 'auditoria', titulo: 'Auditoría', desc: 'Registro de acciones',
       icono: ICONOS.ticket,
       roles: ['SUPERUSUARIO','CONTADOR'],
-      view: 'pendiente', placeholder: 'Auditoría'
+      view: 'auditoria'
     },
    {
       key: 'config', titulo: 'Configuración', desc: 'Ajustes del sistema',
@@ -591,6 +591,8 @@ function irAMenuRestaurante() {
         Usuarios.abrir();
       } else if (t.view === 'configuracion') {
         Configuracion.abrir();
+      } else if (t.view === 'auditoria') {
+        Auditoria.abrir();
       } else {
         showView(t.view);
       }
@@ -618,10 +620,11 @@ document.addEventListener('click', (e) => {
     if (!t) return;
     const dest = t.dataset.go;
     // Si veníamos de Comanda, desenganchar listener + cronómetro
-   if (typeof Comanda !== 'undefined') Comanda.desenganchar();
+  if (typeof Comanda !== 'undefined') Comanda.desenganchar();
     if (typeof Caja    !== 'undefined') Caja.desenganchar();
     if (typeof Anclaje !== 'undefined') Anclaje.desenganchar();
     if (typeof Usuarios !== 'undefined') Usuarios.desenganchar();
+    if (typeof Auditoria !== 'undefined') Auditoria.desenganchar();
     if (dest === 'inicio') irAInicio();
     else if (dest === 'restaurante') irAMenuRestaurante();
     else showView(dest);
@@ -5093,6 +5096,619 @@ const Configuracion = {
 };
 
 /* ============================================================
+   ============================================================
+   FASE 6 / BLOQUE K — VISTA AUDITORÍA
+   Bitácora forense con filtros, agrupación por día, scroll
+   infinito y export CSV. Solo SUPER + CONTADOR.
+   ============================================================
+   ============================================================ */
+const Auditoria = {
+  items: [],
+  filtros: { desde: '', hasta: '', usuarioId: '', modulo: '', busqueda: '' },
+  periodoActivo: '7d',
+  offset: 0,
+  limit: 100,
+  total: 0,
+  hasMore: false,
+  cargando: false,
+  filtrosCatalogo: { usuarios: [], modulos: [] },
+
+  // ── Mapper de emojis por acción (semántico, no por módulo) ─────
+  emojiPorAccion(accion) {
+    const a = String(accion || '').toUpperCase();
+    if (/COBRA|PAGO|PAGAD/.test(a))             return '💰';
+    if (/CANCELA|ELIMINA/.test(a))              return '❌';
+    if (/CREAD|NUEVO/.test(a))                  return '✨';
+    if (/ACTUALIZA|EDITAD|TOGGLE/.test(a))      return '✏️';
+    if (/LOGIN|AUTH/.test(a))                   return '🔐';
+    if (/CONFIG|LOGO|FOTO|IMAGEN/.test(a))      return '🔧';
+    if (/ANCLA|CIERRE/.test(a))                 return '🌙';
+    if (/STOCK|INVENTARIO/.test(a))             return '📦';
+    if (/TICKET|CUENTA/.test(a))                return '🧾';
+    return '📝';
+  },
+
+  async abrir() {
+    showView('auditoria');
+    // Período por defecto: 7 días
+    this.aplicarPeriodo('7d', false);
+    await this.cargarCatalogoFiltros();
+    await this.cargar(true);
+  },
+
+  async cargarCatalogoFiltros() {
+    try {
+      const r = await apiPost('listAuditoriaFiltros', withUser({}));
+      this.filtrosCatalogo = r || { usuarios: [], modulos: [] };
+    } catch (e) {
+      console.error('listAuditoriaFiltros:', e);
+      this.filtrosCatalogo = { usuarios: [], modulos: [] };
+    }
+  },
+
+  async cargar(reset) {
+    if (this.cargando) return;
+    this.cargando = true;
+    if (reset) {
+      this.items = [];
+      this.offset = 0;
+      this.pintarLoading();
+    } else {
+      this.pintarLoadMoreSpinner();
+    }
+    try {
+      const r = await apiPost('listAuditoria', withUser({
+        ...this.filtros,
+        offset: this.offset,
+        limit: this.limit
+      }));
+      this.items = this.items.concat(r.items || []);
+      this.offset += (r.items || []).length;
+      this.total = r.total || 0;
+      this.hasMore = !!r.hasMore;
+      this.render();
+    } catch (e) {
+      this.pintarError(e.message);
+    } finally {
+      this.cargando = false;
+    }
+  },
+
+  pintarLoading() {
+    const cont = $('#aud-content');
+    if (cont) cont.innerHTML = `
+      <div class="aud-loading">
+        <div class="spinner">
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <p class="muted">Cargando registros…</p>
+      </div>`;
+    const foot = $('#aud-footer-load');
+    if (foot) foot.innerHTML = '';
+  },
+
+  pintarLoadMoreSpinner() {
+    const foot = $('#aud-footer-load');
+    if (foot) foot.innerHTML = `<div class="aud-loading-mini">Cargando 100 más…</div>`;
+  },
+
+  pintarError(msg) {
+    const cont = $('#aud-content');
+    if (cont) cont.innerHTML = `
+      <div class="card text-center">
+        <h3>Error al cargar</h3>
+        <p class="muted">${escapeHtml(msg || '')}</p>
+        <button class="btn btn-ghost mt-md" id="aud-btn-retry">Reintentar</button>
+      </div>`;
+    $('#aud-btn-retry')?.addEventListener('click', () => this.cargar(true));
+  },
+
+  render() {
+    // 1. Actualizar contadores y label del período
+    $('#aud-total').textContent = this.total.toLocaleString('es-CO');
+    $('#aud-total-s').textContent = this.total === 1 ? '' : 's';
+    $('#aud-period-label').textContent = this.labelPeriodo();
+
+    // 2. Pills
+    this.actualizarPills();
+
+    // 3. Lista
+    const cont = $('#aud-content');
+    if (!this.items.length) {
+      cont.innerHTML = `
+        <div class="card text-center" style="margin-top:20px;">
+          <div style="font-size:2.4rem; opacity:0.4;">🔍</div>
+          <h3>Sin resultados</h3>
+          <p class="muted">No hay registros con los filtros actuales.</p>
+        </div>`;
+      $('#aud-footer-load').innerHTML = '';
+      return;
+    }
+
+    // Agrupar por yyyy-MM-dd (extraído del prefijo de FECHA)
+    const grupos = {};
+    this.items.forEach(it => {
+      const dia = String(it.fecha || '').substring(0, 10); // yyyy-MM-dd
+      if (!grupos[dia]) grupos[dia] = [];
+      grupos[dia].push(it);
+    });
+    const diasOrdenados = Object.keys(grupos).sort((a, b) => b.localeCompare(a));
+
+    cont.innerHTML = diasOrdenados.map(dia => {
+      const items = grupos[dia];
+      return `
+        <section class="aud-dia">
+          <header class="aud-dia__head">
+            <span class="aud-dia__icon">📌</span>
+            <span class="aud-dia__lbl">${this.etiquetaDia(dia)}</span>
+            <span class="aud-dia__count">${items.length}</span>
+          </header>
+          <div class="aud-dia__body">
+            ${items.map(it => this.renderCard(it)).join('')}
+          </div>
+        </section>`;
+    }).join('');
+
+    // Tap en card → modal con JSON
+    $$('[data-aud-card]', cont).forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.dataset.audCard;
+        const it = this.items.find(x => String(x.id) === String(id));
+        if (it) this.abrirModalDetalle(it);
+      });
+    });
+
+    // Footer "Cargar más"
+    const foot = $('#aud-footer-load');
+    if (this.hasMore) {
+      foot.innerHTML = `<button class="btn btn-ghost btn-block" id="aud-btn-more">Cargar 100 más</button>`;
+      $('#aud-btn-more').addEventListener('click', () => this.cargar(false));
+    } else if (this.items.length) {
+      foot.innerHTML = `<div class="aud-end">— Fin de los resultados —</div>`;
+    } else {
+      foot.innerHTML = '';
+    }
+  },
+
+  renderCard(it) {
+    const hora = String(it.fecha || '').substring(11, 16); // HH:mm
+    const horaAmPm = this.formatearHora12(hora);
+    const emoji = this.emojiPorAccion(it.accion);
+    const rolKey = String(it.rol || '').toLowerCase();
+    const iniciales = this.iniciales(it.nombreUsuario);
+    const avatarHTML = it.fotoUrl
+      ? `<img class="aud-card__avatar-img" src="${escapeHtml(it.fotoUrl)}" alt="" onerror="this.remove()" />`
+      : '';
+    const resumen = this.resumenDetalle(it.detalle);
+    return `
+      <article class="aud-card" data-aud-card="${escapeHtml(it.id)}">
+        <div class="aud-card__hora">${escapeHtml(horaAmPm)}</div>
+        <div class="aud-card__body">
+          <div class="aud-card__head">
+            <div class="aud-card__avatar aud-card__avatar--${rolKey}">
+              <span class="aud-card__avatar-txt">${escapeHtml(iniciales)}</span>
+              ${avatarHTML}
+            </div>
+            <div class="aud-card__who">
+              <div class="aud-card__name">${escapeHtml(it.nombreUsuario || 'Sistema')}</div>
+              <div class="aud-card__rol">${escapeHtml(it.rol || '—')}</div>
+            </div>
+          </div>
+          <div class="aud-card__action">
+            <span class="aud-card__emoji">${emoji}</span>
+            <span class="aud-card__modulo">${escapeHtml(it.modulo || '')}</span>
+            <span class="aud-card__sep">·</span>
+            <span class="aud-card__accion">${escapeHtml(it.accion || '')}</span>
+          </div>
+          ${resumen ? `<div class="aud-card__resumen">${resumen}</div>` : ''}
+        </div>
+        <div class="aud-card__chev">›</div>
+      </article>`;
+  },
+
+  // ── Helpers de presentación ─────────────────────────────────────
+  iniciales(nombre) {
+    const partes = String(nombre || '?').trim().split(/\s+/);
+    if (!partes.length || !partes[0]) return '?';
+    if (partes.length === 1) return partes[0].charAt(0).toUpperCase();
+    return (partes[0].charAt(0) + partes[1].charAt(0)).toUpperCase();
+  },
+
+  formatearHora12(hhmm) {
+    if (!/^\d{2}:\d{2}$/.test(hhmm)) return '—';
+    const [h, m] = hhmm.split(':').map(Number);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h === 0 ? 12 : (h > 12 ? h - 12 : h);
+    return (h12 < 10 ? '0' : '') + h12 + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm;
+  },
+
+  etiquetaDia(yyyyMmDd) {
+    // Formato pedido: "Martes, 26 de mayo de 2026"
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(yyyyMmDd)) return yyyyMmDd;
+    const [y, m, d] = yyyyMmDd.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    let s = dt.toLocaleDateString('es-CO', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+    });
+    // Capitalizar primera letra (toLocaleDateString devuelve "martes,")
+    s = s.charAt(0).toUpperCase() + s.slice(1);
+    // Prefijo "Hoy / Ayer" si aplica
+    const hoy = this.fechaYyyyMmDdLocal();
+    const ayer = this.fechaYyyyMmDdLocalOffset(-1);
+    if (yyyyMmDd === hoy)  return 'HOY — ' + s;
+    if (yyyyMmDd === ayer) return 'AYER — ' + s;
+    return s;
+  },
+
+  fechaYyyyMmDdLocal(d) {
+    d = d || new Date();
+    return d.getFullYear() + '-' +
+           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+           String(d.getDate()).padStart(2, '0');
+  },
+  fechaYyyyMmDdLocalOffset(deltaDias) {
+    const d = new Date();
+    d.setDate(d.getDate() + deltaDias);
+    return this.fechaYyyyMmDdLocal(d);
+  },
+
+  resumenDetalle(detalleStr) {
+    if (!detalleStr) return '';
+    let obj;
+    try { obj = JSON.parse(detalleStr); }
+    catch (_) { return escapeHtml(String(detalleStr).substring(0, 100)); }
+    if (!obj || typeof obj !== 'object') return '';
+
+    // Heurísticas: prioriza campos que el usuario va a reconocer
+    const partes = [];
+    if (obj.mesaNumero != null) partes.push('Mesa ' + obj.mesaNumero);
+    if (obj.nombre) partes.push(escapeHtml(obj.nombre));
+    if (obj.total != null) partes.push(fmtPesos(obj.total));
+    if (obj.totalVentas != null) partes.push(fmtPesos(obj.totalVentas));
+    if (obj.rol) partes.push('rol: ' + escapeHtml(obj.rol));
+    if (obj.pedidoId) partes.push(escapeHtml(obj.pedidoId));
+    if (obj.productoId) partes.push(escapeHtml(obj.productoId));
+    if (obj.motivo) partes.push('motivo: ' + escapeHtml(obj.motivo));
+    if (obj.fecha) partes.push('fecha: ' + escapeHtml(obj.fecha));
+
+    if (!partes.length) {
+      // Fallback: primer key=value
+      const k = Object.keys(obj)[0];
+      if (k) {
+        const v = obj[k];
+        const vstr = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+        partes.push(escapeHtml(k + ': ' + vstr.substring(0, 50)));
+      }
+    }
+    return partes.slice(0, 3).join(' · ');
+  },
+
+  labelPeriodo() {
+    const map = {
+      hoy:    'Hoy',
+      ayer:   'Ayer',
+      '7d':   'Últimos 7 días',
+      mes:    'Este mes',
+      todo:   'Todo el histórico',
+      custom: this.filtros.desde === this.filtros.hasta
+                ? this.filtros.desde
+                : (this.filtros.desde + ' → ' + this.filtros.hasta)
+    };
+    return map[this.periodoActivo] || '';
+  },
+
+  // ── Pills (usuario + módulo) ────────────────────────────────────
+  actualizarPills() {
+    const pu = $('#aud-pill-usuario');
+    const pm = $('#aud-pill-modulo');
+    if (pu) {
+      if (this.filtros.usuarioId) {
+        const u = this.filtrosCatalogo.usuarios.find(x => x.id === this.filtros.usuarioId);
+        pu.querySelector('.aud-pill__lbl').textContent = u ? u.nombre : this.filtros.usuarioId;
+        pu.querySelector('.aud-pill__x').classList.remove('hidden');
+        pu.classList.add('is-active');
+      } else {
+        pu.querySelector('.aud-pill__lbl').textContent = 'Todos los usuarios';
+        pu.querySelector('.aud-pill__x').classList.add('hidden');
+        pu.classList.remove('is-active');
+      }
+    }
+    if (pm) {
+      if (this.filtros.modulo) {
+        pm.querySelector('.aud-pill__lbl').textContent = this.filtros.modulo;
+        pm.querySelector('.aud-pill__x').classList.remove('hidden');
+        pm.classList.add('is-active');
+      } else {
+        pm.querySelector('.aud-pill__lbl').textContent = 'Todos los módulos';
+        pm.querySelector('.aud-pill__x').classList.add('hidden');
+        pm.classList.remove('is-active');
+      }
+    }
+  },
+
+  abrirPillUsuario() {
+    const opciones = this.filtrosCatalogo.usuarios;
+    const items = [`<button class="aud-opt" data-aud-usr="">
+        <span class="aud-opt__avatar aud-opt__avatar--neutral">·</span>
+        <span>Todos los usuarios</span>
+      </button>`]
+      .concat(opciones.map(u => {
+        const rolKey = String(u.rol || '').toLowerCase();
+        const ini = this.iniciales(u.nombre);
+        const img = u.fotoUrl
+          ? `<img class="aud-opt__avatar-img" src="${escapeHtml(u.fotoUrl)}" alt="" onerror="this.remove()" />`
+          : '';
+        return `
+          <button class="aud-opt" data-aud-usr="${escapeHtml(u.id)}">
+            <span class="aud-opt__avatar aud-opt__avatar--${rolKey}">
+              <span class="aud-opt__avatar-txt">${escapeHtml(ini)}</span>
+              ${img}
+            </span>
+            <span>${escapeHtml(u.nombre)}</span>
+            <span class="aud-opt__rol">${escapeHtml(u.rol || '')}</span>
+          </button>`;
+      }));
+    Swal.fire({
+      title: 'Filtrar por usuario',
+      html: `<div class="aud-opts">${items.join('')}</div>`,
+      width: 480,
+      showConfirmButton: false,
+      showCancelButton: true,
+      cancelButtonText: 'Cerrar',
+      didOpen: () => {
+        $$('[data-aud-usr]').forEach(b => {
+          b.addEventListener('click', () => {
+            this.filtros.usuarioId = b.dataset.audUsr || '';
+            Swal.close();
+            this.cargar(true);
+          });
+        });
+      }
+    });
+  },
+
+  abrirPillModulo() {
+    const opciones = this.filtrosCatalogo.modulos;
+    const items = [`<button class="aud-opt" data-aud-mod="">
+        <span class="aud-opt__icon">📦</span><span>Todos los módulos</span>
+      </button>`]
+      .concat(opciones.map(m => `
+        <button class="aud-opt" data-aud-mod="${escapeHtml(m)}">
+          <span class="aud-opt__icon">${this.emojiPorAccion(m)}</span>
+          <span>${escapeHtml(m)}</span>
+        </button>`));
+    Swal.fire({
+      title: 'Filtrar por módulo',
+      html: `<div class="aud-opts">${items.join('')}</div>`,
+      width: 420,
+      showConfirmButton: false,
+      showCancelButton: true,
+      cancelButtonText: 'Cerrar',
+      didOpen: () => {
+        $$('[data-aud-mod]').forEach(b => {
+          b.addEventListener('click', () => {
+            this.filtros.modulo = b.dataset.audMod || '';
+            Swal.close();
+            this.cargar(true);
+          });
+        });
+      }
+    });
+  },
+
+  // ── Período ─────────────────────────────────────────────────────
+  aplicarPeriodo(periodo, recargar) {
+    this.periodoActivo = periodo;
+    const hoy  = this.fechaYyyyMmDdLocal();
+    const ayer = this.fechaYyyyMmDdLocalOffset(-1);
+    const hace7 = this.fechaYyyyMmDdLocalOffset(-6);
+    const primMes = (() => {
+      const d = new Date();
+      d.setDate(1);
+      return this.fechaYyyyMmDdLocal(d);
+    })();
+    switch (periodo) {
+      case 'hoy':   this.filtros.desde = hoy;     this.filtros.hasta = hoy; break;
+      case 'ayer':  this.filtros.desde = ayer;    this.filtros.hasta = ayer; break;
+      case '7d':    this.filtros.desde = hace7;   this.filtros.hasta = hoy; break;
+      case 'mes':   this.filtros.desde = primMes; this.filtros.hasta = hoy; break;
+      case 'todo':  this.filtros.desde = '';      this.filtros.hasta = ''; break;
+    }
+    $$('.aud-chip', $('#aud-chips-periodo')).forEach(c => {
+      c.classList.toggle('is-active', c.dataset.periodo === periodo);
+    });
+    if (recargar) this.cargar(true);
+  },
+
+  abrirPickerCustom() {
+    Swal.fire({
+      title: 'Período personalizado',
+      html: `
+        <label>Desde</label>
+        <input id="aud-desde" type="date" value="${this.filtros.desde || ''}" />
+        <label>Hasta</label>
+        <input id="aud-hasta" type="date" value="${this.filtros.hasta || ''}" />`,
+      showCancelButton: true,
+      confirmButtonText: 'Aplicar',
+      cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      preConfirm: () => {
+        const d = $('#aud-desde').value;
+        const h = $('#aud-hasta').value;
+        if (!d || !h) { Swal.showValidationMessage('Llena ambas fechas'); return false; }
+        if (d > h) { Swal.showValidationMessage('Desde no puede ser mayor que hasta'); return false; }
+        return { d, h };
+      }
+    }).then(r => {
+      if (!r.isConfirmed) {
+        // Restaurar el chip activo previo (no quedó nada seleccionado por error)
+        $$('.aud-chip', $('#aud-chips-periodo')).forEach(c => {
+          c.classList.toggle('is-active', c.dataset.periodo === this.periodoActivo);
+        });
+        return;
+      }
+      this.periodoActivo = 'custom';
+      this.filtros.desde = r.value.d;
+      this.filtros.hasta = r.value.h;
+      $$('.aud-chip', $('#aud-chips-periodo')).forEach(c => {
+        c.classList.toggle('is-active', c.dataset.periodo === 'custom');
+      });
+      this.cargar(true);
+    });
+  },
+
+  // ── Modal de detalle (JSON completo) ────────────────────────────
+  abrirModalDetalle(it) {
+    let json;
+    try { json = JSON.stringify(JSON.parse(it.detalle || '{}'), null, 2); }
+    catch (_) { json = String(it.detalle || ''); }
+    const fechaLarga = this.fechaLargaItem(it.fecha);
+    const emoji = this.emojiPorAccion(it.accion);
+    Swal.fire({
+      title: emoji + ' ' + escapeHtml(it.accion || ''),
+      html: `
+        <div class="aud-modal">
+          <div class="aud-modal__meta">
+            <div class="aud-modal__row"><span>📅</span> ${escapeHtml(fechaLarga)}</div>
+            <div class="aud-modal__row"><span>👤</span> ${escapeHtml(it.nombreUsuario || '—')} <span class="aud-modal__rol">${escapeHtml(it.rol || '')}</span></div>
+            <div class="aud-modal__row"><span>📦</span> Módulo: <b>${escapeHtml(it.modulo || '')}</b></div>
+            <div class="aud-modal__row"><span>🆔</span> ${escapeHtml(it.id)}</div>
+          </div>
+          <div class="aud-modal__detalle-lbl">DETALLE</div>
+          <pre class="aud-modal__json">${escapeHtml(json)}</pre>
+        </div>`,
+      width: 560,
+      showConfirmButton: true,
+      confirmButtonText: 'Cerrar'
+    });
+  },
+
+  fechaLargaItem(fechaStr) {
+    // "yyyy-MM-dd HH:mm:ss" → "Martes, 26 de mayo de 2026, 02:34:11 PM"
+    if (!fechaStr) return '—';
+    const [fecha, hora] = String(fechaStr).split(' ');
+    if (!fecha || !hora) return fechaStr;
+    const [y, m, d] = fecha.split('-').map(Number);
+    const [hh, mm, ss] = hora.split(':').map(Number);
+    const dt = new Date(y, m - 1, d, hh, mm, ss);
+    let dia = dt.toLocaleDateString('es-CO', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+    });
+    dia = dia.charAt(0).toUpperCase() + dia.slice(1);
+    const ampm = hh >= 12 ? 'PM' : 'AM';
+    const h12 = hh === 0 ? 12 : (hh > 12 ? hh - 12 : hh);
+    const horaStr = (h12 < 10 ? '0' : '') + h12 + ':' +
+                    (mm < 10 ? '0' : '') + mm + ':' +
+                    (ss < 10 ? '0' : '') + ss + ' ' + ampm;
+    return dia + ', ' + horaStr;
+  },
+
+  // ── Exportar CSV ────────────────────────────────────────────────
+  exportarCSV() {
+    if (!this.items.length) {
+      Toast && Toast.fire({ icon: 'info', title: 'No hay datos para exportar' });
+      return;
+    }
+    const headers = ['ID','FECHA','USUARIO_ID','NOMBRE_USUARIO','ROL','MODULO','ACCION','DETALLE'];
+    const escapar = (v) => {
+      const s = String(v == null ? '' : v).replace(/"/g, '""');
+      return '"' + s + '"';
+    };
+    const lines = [headers.join(',')];
+    this.items.forEach(it => {
+      lines.push([
+        it.id, it.fecha, it.usuarioId, it.nombreUsuario,
+        it.rol, it.modulo, it.accion, it.detalle
+      ].map(escapar).join(','));
+    });
+    // BOM para Excel/Sheets reconozca UTF-8
+    const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const ts = this.fechaYyyyMmDdLocal().replace(/-/g, '') + '_' +
+               String(new Date().getHours()).padStart(2, '0') +
+               String(new Date().getMinutes()).padStart(2, '0');
+    a.download = 'auditoria_' + ts + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    Toast && Toast.fire({ icon: 'success', title: 'CSV descargado' });
+  },
+
+  desenganchar() { /* sin listeners persistentes */ },
+
+  setupListeners() {
+    // Chips de período
+    $$('.aud-chip', $('#aud-chips-periodo')).forEach(c => {
+      if (c._bound) return;
+      c._bound = true;
+      c.addEventListener('click', () => {
+        const p = c.dataset.periodo;
+        if (p === 'custom') return this.abrirPickerCustom();
+        this.aplicarPeriodo(p, true);
+      });
+    });
+    // Pills
+    const pu = $('#aud-pill-usuario');
+    if (pu && !pu._bound) {
+      pu._bound = true;
+      pu.addEventListener('click', (e) => {
+        if (e.target.classList.contains('aud-pill__x')) {
+          this.filtros.usuarioId = '';
+          this.cargar(true);
+          return;
+        }
+        this.abrirPillUsuario();
+      });
+    }
+    const pm = $('#aud-pill-modulo');
+    if (pm && !pm._bound) {
+      pm._bound = true;
+      pm.addEventListener('click', (e) => {
+        if (e.target.classList.contains('aud-pill__x')) {
+          this.filtros.modulo = '';
+          this.cargar(true);
+          return;
+        }
+        this.abrirPillModulo();
+      });
+    }
+    // Búsqueda
+    const btn = $('#aud-search-btn');
+    const bar = $('#aud-search-bar');
+    const inp = $('#aud-search-input');
+    if (btn && !btn._bound) {
+      btn._bound = true;
+      btn.addEventListener('click', () => {
+        bar.classList.toggle('hidden');
+        if (!bar.classList.contains('hidden')) inp.focus();
+        else { inp.value = ''; this.filtros.busqueda = ''; this.cargar(true); }
+      });
+    }
+    if (inp && !inp._bound) {
+      inp._bound = true;
+      let t = null;
+      inp.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(() => {
+          this.filtros.busqueda = inp.value.trim();
+          this.cargar(true);
+        }, 350);
+      });
+    }
+    // CSV
+    const csv = $('#aud-csv');
+    if (csv && !csv._bound) {
+      csv._bound = true;
+      csv.addEventListener('click', () => this.exportarCSV());
+    }
+  }
+};
+
+/* ============================================================
    INICIALIZACIÓN
    ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
@@ -5115,4 +5731,6 @@ window.addEventListener('DOMContentLoaded', () => {
   Anclaje.setupListeners();
   Usuarios.setupListeners();
   Configuracion.setupListeners();
+// Fase 6
+  Auditoria.setupListeners();
 });
