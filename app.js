@@ -27,7 +27,7 @@ const firebaseConfig = {
 /* ============================================================
    CONSTANTES GENERALES
    ============================================================ */
-const APP_VERSION = '2026.05.25.4'; // se sobreescribe al leer version.json
+const APP_VERSION = '2026.05.26.1'; // se sobreescribe al leer version.json
 const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
@@ -4173,7 +4173,7 @@ const Usuarios = {
     });
   },
 
-  renderTarjeta(u) {
+renderTarjeta(u) {
     const iniciales = this.iniciales(u.nombre);
     const rolKey = String(u.rol).toLowerCase();
     const negociosTags = (u.negocios || []).map(id => {
@@ -4181,9 +4181,18 @@ const Usuarios = {
       const label = n ? (n.tipo || n.nombre || id) : id;
       return `<span class="usr-tag">${escapeHtml(label)}</span>`;
     }).join('');
+    // Bloque I — si hay foto, la pintamos encima de las iniciales. Si la
+    // imagen falla, onerror la quita y vuelven a verse las iniciales.
+    const imgHTML = u.fotoUrl
+      ? `<img class="usr-card__avatar__img" src="${escapeHtml(u.fotoUrl)}"
+              alt="" loading="lazy" onerror="this.remove()" />`
+      : '';
     return `
       <article class="usr-card" data-usr-edit="${u.id}">
-        <div class="usr-card__avatar usr-card__avatar--${rolKey}">${escapeHtml(iniciales)}</div>
+        <div class="usr-card__avatar usr-card__avatar--${rolKey}">
+          <span class="usr-card__avatar__txt">${escapeHtml(iniciales)}</span>
+          ${imgHTML}
+        </div>
         <div class="usr-card__body">
           <div class="usr-card__head">
             <h4 class="usr-card__name">${escapeHtml(u.nombre)}</h4>
@@ -4214,14 +4223,17 @@ const Usuarios = {
     return s.slice(0, 3) + ' ' + s.slice(3, 6) + ' ' + s.slice(6);
   },
 
-  abrirModal(usuario) {
+abrirModal(usuario) {
     const isNew = !usuario;
     const u = usuario || {
       id: '', nombre: '', documento: '', telefono: '',
-      rol: 'MESERO', pin: '', negocios: [], email: ''
+      rol: 'MESERO', pin: '', negocios: [], email: '', fotoUrl: ''
     };
     const self = this;
     const esYoMismo = !isNew && String(u.id) === String(state.user?.id);
+    // Bloque I — estado mutable de la foto durante la edición del modal.
+    // Si el usuario sube nueva, fotoState.url cambia. Si toca "Quitar", queda ''.
+    const fotoState = { url: u.fotoUrl || '', cambiado: false };
 
     const optsRoles = this.ROLES.map(r =>
       `<option value="${r}" ${r === u.rol ? 'selected' : ''}>${r}</option>`
