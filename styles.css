@@ -3748,15 +3748,12 @@ textarea { resize: vertical; min-height: 80px; }
   box-shadow: var(--sh-sm);
 }
 .aud-dia__head {
-  position: sticky;
-  top: 64px; /* debajo del app-header */
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
   background: linear-gradient(135deg, var(--primary) 0%, var(--primary-2) 100%);
   color: #fff;
-  z-index: 5;
 }
 .aud-dia__icon { font-size: 0.95rem; }
 .aud-dia__lbl {
