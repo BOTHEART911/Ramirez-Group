@@ -409,8 +409,15 @@ async function irAInicio() {
   // Pintar bienvenida
   $('#welcome-name').textContent = state.user.nombre;
   $('#welcome-rol').textContent  = state.user.rol;
+  // Bloque I — avatar: foto si la hay, fallback a inicial
   const inicial = String(state.user.nombre || '?').trim().charAt(0).toUpperCase();
-  $('#welcome-avatar').textContent = inicial;
+  const avatarEl = $('#welcome-avatar');
+  if (state.user.fotoUrl) {
+    avatarEl.innerHTML = `<span class="welcome-bar__avatar-txt">${inicial}</span>` +
+                         `<img class="welcome-bar__avatar-img" src="${state.user.fotoUrl}" alt="" onerror="this.remove()" />`;
+  } else {
+    avatarEl.textContent = inicial;
+  }
   // Cargar negocios disponibles
   await cargarNegocios();
   showView('inicio');
@@ -4261,10 +4268,23 @@ abrirModal(usuario) {
                    title="Mostrar / ocultar PIN">👁</button>
          </div>`;
 
+    const iniModal = this.iniciales(u.nombre || '?');
     const html = `
       <div class="usr-modal">
-        <div class="usr-modal__avatar usr-card__avatar--${String(u.rol || 'MESERO').toLowerCase()}">
-          ${escapeHtml(this.iniciales(u.nombre || '?'))}
+        <div id="u-avatar-wrap" class="usr-modal__avatar usr-card__avatar--${String(u.rol || 'MESERO').toLowerCase()}">
+          <span class="usr-card__avatar__txt">${escapeHtml(iniModal)}</span>
+          ${fotoState.url
+            ? `<img id="u-avatar-img" class="usr-card__avatar__img" src="${escapeHtml(fotoState.url)}" alt="" onerror="this.remove()" />`
+            : ''}
+        </div>
+        <div class="usr-modal__foto-btns">
+          <label class="usr-modal__foto-btn">
+            📷 ${fotoState.url ? 'Cambiar foto' : 'Subir foto'}
+            <input id="u-foto-file" type="file" accept="image/*" hidden />
+          </label>
+          <button type="button" id="u-foto-quitar" class="usr-modal__foto-btn usr-modal__foto-btn--quitar ${fotoState.url ? '' : 'hidden'}">
+            🗑 Quitar foto
+          </button>
         </div>
 
         <label>Nombre completo</label>
@@ -4338,6 +4358,67 @@ abrirModal(usuario) {
             el.value = el.value.replace(/\D/g, '');
           });
         });
+        // Bloque I — Helpers para actualizar el preview del avatar
+        const refrescarAvatar = () => {
+          const wrap = $('#u-avatar-wrap');
+          if (!wrap) return;
+          const oldImg = $('#u-avatar-img');
+          if (oldImg) oldImg.remove();
+          if (fotoState.url) {
+            const img = document.createElement('img');
+            img.id = 'u-avatar-img';
+            img.className = 'usr-card__avatar__img';
+            img.src = fotoState.url;
+            img.alt = '';
+            img.onerror = () => img.remove();
+            wrap.appendChild(img);
+          }
+          $('#u-foto-quitar')?.classList.toggle('hidden', !fotoState.url);
+          const lbl = wrap.parentElement.querySelector('.usr-modal__foto-btn:not(.usr-modal__foto-btn--quitar)');
+          if (lbl) lbl.innerHTML = (fotoState.url ? '📷 Cambiar foto' : '📷 Subir foto') +
+                                    '<input id="u-foto-file" type="file" accept="image/*" hidden />';
+          bindFotoFile();
+        };
+        const bindFotoFile = () => {
+          const inp = $('#u-foto-file');
+          if (!inp) return;
+          inp.addEventListener('change', async () => {
+            const file = inp.files && inp.files[0];
+            if (!file) return;
+            if (file.size > 4 * 1024 * 1024) {
+              Toast && Toast.fire({ icon: 'warning', title: 'Imagen muy grande (máx 4 MB)' });
+              inp.value = '';
+              return;
+            }
+            try {
+              const lbl = inp.parentElement;
+              const lblHTML = lbl.innerHTML;
+              lbl.innerHTML = '⏳ Subiendo…';
+              const base64 = await fileToBase64(file);
+              const r = await apiPost('subirFotoUsuario', withUser({
+                usuarioId: u.id || null,
+                filename:  file.name,
+                base64
+              }));
+              fotoState.url = r.url;
+              fotoState.cambiado = true;
+              refrescarAvatar();
+              Toast && Toast.fire({ icon: 'success', title: 'Foto subida' });
+            } catch (e) {
+              const lbl = $('#u-foto-file')?.parentElement;
+              if (lbl) lbl.innerHTML = (fotoState.url ? '📷 Cambiar foto' : '📷 Subir foto') +
+                                        '<input id="u-foto-file" type="file" accept="image/*" hidden />';
+              bindFotoFile();
+              Toast && Toast.fire({ icon: 'error', title: 'No se pudo subir: ' + e.message });
+            }
+          });
+        };
+        bindFotoFile();
+        $('#u-foto-quitar')?.addEventListener('click', () => {
+          fotoState.url = '';
+          fotoState.cambiado = true;
+          refrescarAvatar();
+        });
       },
       preConfirm: () => {
         const datos = {
@@ -4349,6 +4430,9 @@ abrirModal(usuario) {
           email:     $('#u-email').value.trim(),
           negocios:  $$('[data-usr-neg]:checked').map(el => el.dataset.usrNeg)
         };
+        // Bloque I — sólo mandamos fotoUrl si el usuario tocó algo en el modal.
+        // Si no, el backend deja la foto existente intacta (undefined no la sobreescribe).
+        if (fotoState.cambiado) datos.fotoUrl = fotoState.url;
         const err = self.validarLocal(datos, isNew ? null : u.id);
         if (err) { Swal.showValidationMessage(err); return false; }
         return datos;
@@ -4402,6 +4486,8 @@ abrirModal(usuario) {
         email:     datos.email,
         negocios:  datos.negocios
       };
+      // Bloque I — fotoUrl solo viaja si el modal lo marcó como cambiado
+      if (datos.fotoUrl !== undefined) body.fotoUrl = datos.fotoUrl;
       if (idEditando) body.id = idEditando;
       await apiPost('upsertUsuario', withUser(body));
       stopLoading();
