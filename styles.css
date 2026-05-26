@@ -3747,13 +3747,19 @@ textarea { resize: vertical; min-height: 80px; }
   overflow: hidden;
   box-shadow: var(--sh-sm);
 }
+.aud-dia { isolation: isolate; }
 .aud-dia__head {
-  display: flex;
+  position: static !important;
+  top: auto !important;
+  z-index: auto !important;
+  display: flex !important;
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
   background: linear-gradient(135deg, var(--primary) 0%, var(--primary-2) 100%);
   color: #fff;
+  width: 100%;
+  box-sizing: border-box;
 }
 .aud-dia__icon { font-size: 0.95rem; }
 .aud-dia__lbl {
