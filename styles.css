@@ -3166,6 +3166,84 @@ textarea { resize: vertical; min-height: 80px; }
 .usr-card__avatar--cocina        { background: var(--rol-cocina); }
 .usr-card__avatar--caja          { background: var(--rol-caja); }
 
+/* Fase 6 / Bloque I — Foto del avatar (cards + modal) */
+.usr-card__avatar { position: relative; overflow: hidden; }
+.usr-card__avatar__txt {
+  position: relative;
+  z-index: 0;
+}
+.usr-card__avatar__img {
+  position: absolute;
+  top: 3px; left: 3px;
+  width: calc(100% - 6px);
+  height: calc(100% - 6px);
+  border-radius: 50%;
+  object-fit: cover;
+  z-index: 1;
+  background: var(--bg-soft);
+}
+/* En el avatar grande del modal, dejamos un aro un poco más grueso */
+.usr-modal__avatar .usr-card__avatar__img {
+  top: 4px; left: 4px;
+  width: calc(100% - 8px);
+  height: calc(100% - 8px);
+}
+
+/* Botones de foto en el modal de usuario */
+.usr-modal__foto-btns {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin: -4px 0 14px;
+  flex-wrap: wrap;
+}
+.usr-modal__foto-btn {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
+  border-radius: var(--r-sm);
+  font-weight: 700 !important;
+  font-size: 0.82rem !important;
+  cursor: pointer;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  margin: 0 !important;
+  transition: background 0.15s, color 0.15s;
+}
+.usr-modal__foto-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.usr-modal__foto-btn--quitar {
+  background: rgba(220, 38, 38, 0.08);
+  color: #b91c1c;
+  border-color: rgba(220, 38, 38, 0.30);
+}
+.usr-modal__foto-btn--quitar:hover {
+  background: rgba(220, 38, 38, 0.16);
+  color: #b91c1c;
+}
+
+/* Bloque I — Foto en welcome-bar del inicio */
+.welcome-bar__avatar { position: relative; overflow: hidden; }
+.welcome-bar__avatar-txt {
+  position: relative;
+  z-index: 0;
+}
+.welcome-bar__avatar-img {
+  position: absolute;
+  top: 2px; left: 2px;
+  width: calc(100% - 4px);
+  height: calc(100% - 4px);
+  border-radius: 50%;
+  object-fit: cover;
+  z-index: 1;
+}
+
 .usr-card__body { min-width: 0; }
 .usr-card__head {
   display: flex;
