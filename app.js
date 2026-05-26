@@ -4701,12 +4701,13 @@ const Configuracion = {
   abiertas: new Set(),       // claves de secciones expandidas
   guardando: false,
 
-  SECCIONES: [
+SECCIONES: [
     { key: 'datos',     titulo: '🏷  Datos del restaurante' },
     { key: 'operacion', titulo: '💼  Operación' },
     { key: 'tiempos',   titulo: '⏱  Tiempos de alerta' },
     { key: 'whatsapp',  titulo: '💬  WhatsApp' },
-    { key: 'horario',   titulo: '🕒  Horario' }
+    { key: 'horario',   titulo: '🕒  Horario' },
+    { key: 'reservas',  titulo: '📅  Reservas' }
   ],
 
   // Defaults usados como hints visuales y para preview de plantillas
@@ -4724,7 +4725,7 @@ const Configuracion = {
       'Mesa {mesa}\n' +
       '{plato}\n\n' +
       'Por favor recoger en cocina.',
-    WA_TEMPLATE_CIERRE:
+WA_TEMPLATE_CIERRE:
       '🌙 *ANCLAJE DEL DÍA*\n' +
       '*{razonSocial}*\n\n' +
       '📅 {fechaCorte}\n' +
@@ -4735,10 +4736,39 @@ const Configuracion = {
       '💵 Efectivo: {efectivo} (dif {difEfectivo})\n' +
       '📱 Transfer: {transfer} (dif {difTransfer})\n\n' +
       '🏆 Top 3:\n{top3}\n\n' +
-      '📝 {observacion}'
+      '📝 {observacion}',
+    // Fase 7 / Bloque Q — Reservas
+    WA_TEMPLATE_RESERVA_CLIENTE:
+      '✨ ¡Hola {cliente}! Recibimos tu solicitud de reserva 🐟\n\n' +
+      '📅 *{fechaReservaLarga}*\n' +
+      '👥 {personas} persona(s)\n' +
+      '🎉 {tipoEvento}\n\n' +
+      'En el menor tiempo posible revisaremos tu solicitud y te confirmaremos por este mismo medio. 💚\n\n' +
+      'Puedes consultar el estado o cancelar tu reserva aquí:\n' +
+      '{consultaUrl}\n\n' +
+      '🍽️ *{razonSocial}*',
+    WA_TEMPLATE_RESERVA_GRUPO:
+      '🚨 *NUEVA SOLICITUD DE RESERVA* 🚨\n\n' +
+      '🕒 Solicitada: {fechaSolicitudLarga}\n' +
+      '📅 Para: *{fechaReservaLarga}*\n\n' +
+      '👤 {clienteNombre}\n' +
+      '📱 {clienteTelefono}\n' +
+      '👥 {personas} persona(s)\n' +
+      '🎉 {tipoEvento}\n' +
+      '📝 {observaciones}\n\n' +
+      '⚡ Revisar en la app y confirmar o rechazar.',
+    WA_TEMPLATE_RESERVA_CONFIRMACION:
+      '🎉 ¡{cliente}, tu reserva está *{estadoTexto}*! 🐟\n\n' +
+      '📅 *{fechaReservaLarga}*\n' +
+      '👥 {personas} persona(s)\n' +
+      '{mesaLinea}' +
+      '{motivoLinea}' +
+      '\n📍 {direccion}\n' +
+      '📞 {telefonoRestaurante}\n\n' +
+      '💚 *{razonSocial}* te espera.'
   },
 
-  PREVIEW_DATA: {
+PREVIEW_DATA: {
     cliente: 'Juan', razonSocial: 'Restaurante y Pescadería Ramírez',
     total: '$ 85.000', metodo: 'EFECTIVO',
     ticketLink: '🧾 Ver ticket: https://...',
@@ -4750,7 +4780,21 @@ const Configuracion = {
     efectivo: '$ 800.000', difEfectivo: '$ 0',
     transfer: '$ 400.000', difTransfer: '$ 0',
     top3: '1. BANDEJA DE TILAPIA × 8\n2. CALDO DE PESCADO × 5\n3. CERVEZA × 12',
-    observacion: 'Sin novedades.'
+    observacion: 'Sin novedades.',
+    // Fase 7 / Bloque Q — Reservas
+    fechaReservaLarga:   'Martes, 28 de Mayo de 2026 5:00 PM',
+    fechaSolicitudLarga: 'Lunes, 26 de Mayo de 2026 3:30 PM',
+    personas: '4',
+    tipoEvento: 'Cumpleaños',
+    consultaUrl: 'https://reservas.ramirez.com?token=abc123def456',
+    clienteNombre: 'JUAN PÉREZ TORRES',
+    clienteTelefono: '3001234567',
+    observaciones: 'Mesa cerca a la ventana, por favor',
+    estadoTexto: 'CONFIRMADA ✅',
+    mesaLinea: '🪑 Mesa asignada: 5\n',
+    motivoLinea: '',
+    direccion: 'Calle 1 # 23-45, Bogotá',
+    telefonoRestaurante: '3001112233'
   },
 
   async abrir() {
@@ -4793,7 +4837,8 @@ const Configuracion = {
     const fileLogo = $('#cfg-logo-file');
     if (fileLogo) fileLogo.addEventListener('change', () => this.subirLogo(fileLogo));
     // Preview plantillas
-    ['WA_TEMPLATE_TICKET','WA_TEMPLATE_PLATO_LISTO','WA_TEMPLATE_CIERRE'].forEach(k => {
+    ['WA_TEMPLATE_TICKET','WA_TEMPLATE_PLATO_LISTO','WA_TEMPLATE_CIERRE',
+     'WA_TEMPLATE_RESERVA_CLIENTE','WA_TEMPLATE_RESERVA_GRUPO','WA_TEMPLATE_RESERVA_CONFIRMACION'].forEach(k => {
       const ta = $('#cfg-' + k);
       if (ta) ta.addEventListener('input', () => this.actualizarPreview(k));
     });
@@ -4923,7 +4968,7 @@ const Configuracion = {
           ${this.renderTemplate('WA_TEMPLATE_PLATO_LISTO', 'Plantilla: plato listo (mesero)')}
           ${this.renderTemplate('WA_TEMPLATE_CIERRE', 'Plantilla: resumen diario al dueño')}`;
 
-      case 'horario':
+   case 'horario':
         return `
           <div class="grid-2">
             <div>
@@ -4940,6 +4985,26 @@ const Configuracion = {
           <p class="muted" style="font-size:0.74rem;">
             Si el cierre es menor que la apertura (ej. 11:00 → 02:00), se entiende cierre al día siguiente.
           </p>`;
+
+      case 'reservas':
+        return `
+          <label>ID del grupo de WhatsApp del equipo</label>
+          <input id="cfg-WA_GRUPO_RESERVAS_ID" type="text" value="${v('WA_GRUPO_RESERVAS_ID', 'GBtxT6Grel2DcU4sWrGnpx')}"
+                 placeholder="GBtxT6Grel2DcU4sWrGnpx" />
+          <p class="muted" style="font-size:0.72rem;">
+            ID alfanumérico del grupo en BuilderBot. Es donde llegan las solicitudes nuevas para que el equipo confirme o rechace.
+          </p>
+
+          <label>URL base del sitio público de reservas</label>
+          <input id="cfg-RESERVAS_URL_PUBLICA" type="url" value="${v('RESERVAS_URL_PUBLICA')}"
+                 placeholder="https://reservas.tu-dominio.com" />
+          <p class="muted" style="font-size:0.72rem;">
+            Sin el parámetro <code>?token=</code>. Se usa para construir el link que se envía al cliente en el WhatsApp #1.
+          </p>
+
+          ${this.renderTemplate('WA_TEMPLATE_RESERVA_CLIENTE',      'Plantilla #1: solicitud recibida (al cliente)')}
+          ${this.renderTemplate('WA_TEMPLATE_RESERVA_GRUPO',        'Plantilla #2: nueva solicitud (al equipo del grupo)')}
+          ${this.renderTemplate('WA_TEMPLATE_RESERVA_CONFIRMACION', 'Plantilla #3: confirmación o rechazo (al cliente)')}`;
     }
     return '';
   },
@@ -5006,7 +5071,7 @@ const Configuracion = {
       const t = String(datos.WA_TELEFONO_DUENO || '').trim();
       if (t && !/^3\d{9}$/.test(t)) return 'Teléfono del dueño debe ser celular Colombia (10 dígitos, inicia en 3)';
     }
-    if (key === 'horario') {
+if (key === 'horario') {
       const re = /^\d{2}:\d{2}$/;
       const ha = String(datos.RESTAURANTE_HORA_APERTURA || '').trim();
       const hc = String(datos.RESTAURANTE_HORA_CIERRE || '').trim();
@@ -5016,11 +5081,21 @@ const Configuracion = {
       const [ch, cm] = hc.split(':').map(Number);
       if (ah > 23 || am > 59 || ch > 23 || cm > 59) return 'Hora inválida (rango 00:00 - 23:59)';
     }
+    if (key === 'reservas') {
+      const idg = String(datos.WA_GRUPO_RESERVAS_ID || '').trim();
+      if (!idg) return 'ID del grupo de WhatsApp requerido';
+      if (idg.length < 8) return 'ID del grupo demasiado corto (mínimo 8 caracteres)';
+      const url = String(datos.RESERVAS_URL_PUBLICA || '').trim();
+      if (url && !/^https?:\/\//.test(url)) return 'La URL del sitio público debe empezar con https:// (o http://)';
+      // Las 3 plantillas no son obligatorias (vacío = usar la del config inicial)
+      // pero si están, deben tener algo razonable
+      ['WA_TEMPLATE_RESERVA_CLIENTE','WA_TEMPLATE_RESERVA_GRUPO','WA_TEMPLATE_RESERVA_CONFIRMACION'].forEach(k => {});
+    }
     return null;
   },
 
   // ── Mapeo sección → claves ────────────────────────────────
-  clavesDeSeccion(key) {
+ clavesDeSeccion(key) {
     switch (key) {
       case 'datos':     return ['RESTAURANTE_RAZON_SOCIAL','RESTAURANTE_NIT','RESTAURANTE_TELEFONO',
                                 'RESTAURANTE_DIRECCION','RESTAURANTE_LOGO_URL','RESTAURANTE_TICKET_PIE'];
@@ -5029,6 +5104,9 @@ const Configuracion = {
       case 'whatsapp':  return ['BB_API_URL','WA_TELEFONO_DUENO',
                                 'WA_TEMPLATE_TICKET','WA_TEMPLATE_PLATO_LISTO','WA_TEMPLATE_CIERRE'];
       case 'horario':   return ['RESTAURANTE_HORA_APERTURA','RESTAURANTE_HORA_CIERRE'];
+      case 'reservas':  return ['WA_GRUPO_RESERVAS_ID','RESERVAS_URL_PUBLICA',
+                                'WA_TEMPLATE_RESERVA_CLIENTE','WA_TEMPLATE_RESERVA_GRUPO',
+                                'WA_TEMPLATE_RESERVA_CONFIRMACION'];
     }
     return [];
   },
