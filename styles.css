@@ -3182,15 +3182,26 @@ textarea { resize: vertical; min-height: 80px; }
   z-index: 1;
   background: var(--bg-soft);
 }
-/* En el avatar grande del modal, dejamos un aro un poco más grueso */
-.usr-modal__avatar {
-  position: relative;
-  overflow: hidden;
+/* En el avatar grande del modal, dejamos un aro un poco más grueso.
+   Usamos #id + !important porque SweetAlert aplica reglas globales a
+   las imágenes dentro del popup que ganaban por especificidad. */
+#u-avatar-wrap.usr-modal__avatar {
+  position: relative !important;
+  overflow: hidden !important;
+  width: 64px !important;
+  height: 64px !important;
 }
-.usr-modal__avatar .usr-card__avatar__img {
-  top: 4px; left: 4px;
-  width: calc(100% - 8px);
-  height: calc(100% - 8px);
+#u-avatar-wrap .usr-card__avatar__img {
+  position: absolute !important;
+  top: 4px !important;
+  left: 4px !important;
+  width: calc(100% - 8px) !important;
+  height: calc(100% - 8px) !important;
+  max-width: none !important;
+  max-height: none !important;
+  border-radius: 50% !important;
+  object-fit: cover !important;
+  display: block !important;
 }
 
 /* Botones de foto en el modal de usuario */
