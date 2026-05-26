@@ -525,6 +525,72 @@
     </button>
   </section>
 
+<!-- ============================================================
+       VISTA AUDITORÍA  (Fase 6 / Bloque K)
+       ============================================================ -->
+  <section id="view-auditoria" class="view">
+    <header class="app-header">
+      <button class="app-header__back" data-go="restaurante" title="Volver">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"/>
+          <polyline points="12 19 5 12 12 5"/>
+        </svg>
+      </button>
+      <h1 class="app-header__title">Auditoría</h1>
+      <button id="aud-search-btn" class="app-header__icon" title="Buscar">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="7"/>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+      </button>
+    </header>
+    <div class="container">
+      <div id="aud-search-bar" class="search-bar hidden">
+        <input id="aud-search-input" type="search"
+               placeholder="Buscar por usuario, acción, ID, detalle…" autocomplete="off" />
+      </div>
+
+      <!-- Header con stats + acciones -->
+      <div class="aud-stats">
+        <div class="aud-stats__count"><span id="aud-total">—</span> evento<span id="aud-total-s">s</span></div>
+        <div class="aud-stats__period" id="aud-period-label">—</div>
+        <button id="aud-csv" class="aud-btn-csv" title="Exportar CSV">📥 CSV</button>
+      </div>
+
+      <!-- Chips de período -->
+      <div class="aud-chips" id="aud-chips-periodo">
+        <button class="aud-chip"           data-periodo="hoy">Hoy</button>
+        <button class="aud-chip"           data-periodo="ayer">Ayer</button>
+        <button class="aud-chip is-active" data-periodo="7d">7 días</button>
+        <button class="aud-chip"           data-periodo="mes">Mes</button>
+        <button class="aud-chip"           data-periodo="todo">Todo</button>
+        <button class="aud-chip aud-chip--custom" data-periodo="custom">📅</button>
+      </div>
+
+      <!-- Pills de usuario y módulo -->
+      <div class="aud-pills">
+        <button class="aud-pill" id="aud-pill-usuario">
+          <span class="aud-pill__icon">👤</span>
+          <span class="aud-pill__lbl">Todos los usuarios</span>
+          <span class="aud-pill__x hidden">×</span>
+        </button>
+        <button class="aud-pill" id="aud-pill-modulo">
+          <span class="aud-pill__icon">📦</span>
+          <span class="aud-pill__lbl">Todos los módulos</span>
+          <span class="aud-pill__x hidden">×</span>
+        </button>
+      </div>
+
+      <!-- Lista agrupada por día -->
+      <div id="aud-content" class="aud-content"></div>
+
+      <!-- Footer: Cargar más / fin de lista -->
+      <div id="aud-footer-load" class="aud-footer-load"></div>
+    </div>
+  </section>
+
   <!-- ============================================================
        VISTAS PLACEHOLDER (Fases siguientes)
        ============================================================ -->
