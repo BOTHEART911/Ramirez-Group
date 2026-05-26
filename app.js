@@ -4342,7 +4342,7 @@ abrirModal(usuario) {
       denyButtonText: 'Eliminar',
       reverseButtons: true,
       focusConfirm: false,
-      didOpen: () => {
+     didOpen: () => {
         const toggle = $('#u-pin-toggle');
         if (toggle) {
           toggle.addEventListener('click', () => {
@@ -4358,7 +4358,27 @@ abrirModal(usuario) {
             el.value = el.value.replace(/\D/g, '');
           });
         });
-        // Bloque I — Helpers para actualizar el preview del avatar
+
+        // ── Bloque I — Banner inline DENTRO del modal ─────────────
+        // Mismo patrón que Caja._mostrarBannerTicket: no podemos usar
+        // Toast/Swal porque cerrarían el modal padre (Swal solo soporta
+        // un popup activo a la vez). Banner se autoelimina a los 2.4s.
+        const mostrarBanner = (tipo, mensaje) => {
+          const cont = document.querySelector('.swal2-html-container .usr-modal');
+          if (!cont) return;
+          const prev = cont.querySelector('.usr-modal__banner');
+          if (prev) prev.remove();
+          const banner = document.createElement('div');
+          banner.className = 'usr-modal__banner usr-modal__banner--' + tipo;
+          banner.innerHTML = (tipo === 'ok' ? '✓ ' : tipo === 'warn' ? '⚠ ' : '⚠ ') + escapeHtml(mensaje);
+          cont.insertBefore(banner, cont.firstChild);
+          setTimeout(() => {
+            banner.classList.add('is-fading');
+            setTimeout(() => banner.remove(), 300);
+          }, 2400);
+        };
+
+        // ── Bloque I — Helpers de avatar + file picker ────────────
         const refrescarAvatar = () => {
           const wrap = $('#u-avatar-wrap');
           if (!wrap) return;
@@ -4374,7 +4394,7 @@ abrirModal(usuario) {
             wrap.appendChild(img);
           }
           $('#u-foto-quitar')?.classList.toggle('hidden', !fotoState.url);
-          const lbl = wrap.parentElement.querySelector('.usr-modal__foto-btn:not(.usr-modal__foto-btn--quitar)');
+          const lbl = document.querySelector('.usr-modal__foto-btn:not(.usr-modal__foto-btn--quitar)');
           if (lbl) lbl.innerHTML = (fotoState.url ? '📷 Cambiar foto' : '📷 Subir foto') +
                                     '<input id="u-foto-file" type="file" accept="image/*" hidden />';
           bindFotoFile();
@@ -4386,35 +4406,44 @@ abrirModal(usuario) {
             const file = inp.files && inp.files[0];
             if (!file) return;
             if (file.size > 4 * 1024 * 1024) {
-              Toast && Toast.fire({ icon: 'warning', title: 'Imagen muy grande (máx 4 MB)' });
+              mostrarBanner('warn', 'Imagen muy grande (máx 4 MB)');
               inp.value = '';
               return;
             }
+            const lbl = inp.parentElement;
+            const restaurarLabel = () => {
+              if (!lbl) return;
+              lbl.innerHTML = (fotoState.url ? '📷 Cambiar foto' : '📷 Subir foto') +
+                              '<input id="u-foto-file" type="file" accept="image/*" hidden />';
+              bindFotoFile();
+            };
             try {
-              const lbl = inp.parentElement;
-              const lblHTML = lbl.innerHTML;
               lbl.innerHTML = '⏳ Subiendo…';
               const base64 = await fileToBase64(file);
               const r = await apiPost('subirFotoUsuario', withUser({
-                usuarioId: u.id || null,
-                filename:  file.name,
-                base64
+                usuarioId:  u.id || null,
+                filename:   file.name,
+                base64,
+                // Bloque I — la foto anterior (subida en este mismo modal o ya
+                // persistida desde antes) se borra del Drive al subir la nueva
+                fotoPrevia: fotoState.url || ''
               }));
               fotoState.url = r.url;
               fotoState.cambiado = true;
-              refrescarAvatar();
-              Toast && Toast.fire({ icon: 'success', title: 'Foto subida' });
+              refrescarAvatar();   // restaura label a "Cambiar foto"
+              mostrarBanner('ok', 'Foto lista — guarda para aplicar');
             } catch (e) {
-              const lbl = $('#u-foto-file')?.parentElement;
-              if (lbl) lbl.innerHTML = (fotoState.url ? '📷 Cambiar foto' : '📷 Subir foto') +
-                                        '<input id="u-foto-file" type="file" accept="image/*" hidden />';
-              bindFotoFile();
-              Toast && Toast.fire({ icon: 'error', title: 'No se pudo subir: ' + e.message });
+              restaurarLabel();
+              mostrarBanner('err', 'No se pudo subir: ' + e.message);
             }
           });
         };
         bindFotoFile();
         $('#u-foto-quitar')?.addEventListener('click', () => {
+          // Solo marcamos en estado local. El borrado real de Drive ocurre
+          // en el backend dentro de apiUpsertUsuario_ cuando confirma la
+          // transacción (Sheets y Drive quedan siempre sincronizados, y
+          // si el usuario cancela el modal no se borra nada).
           fotoState.url = '';
           fotoState.cambiado = true;
           refrescarAvatar();
