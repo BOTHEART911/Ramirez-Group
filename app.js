@@ -529,11 +529,11 @@ function irAMenuRestaurante() {
       roles: ['SUPERUSUARIO','ADMINISTRADOR','CONTADOR'],
       view: 'anclaje'
     },
-    {
-      key: 'balances', titulo: 'Balances', desc: 'Reportes mensuales',
+  {
+      key: 'balances', titulo: 'Balances', desc: 'Reportes y análisis',
       icono: ICONOS.excel,
       roles: ['SUPERUSUARIO','CONTADOR'],
-      view: 'pendiente', placeholder: 'Balances mensuales'
+      view: 'balances'
     },
     {
       key: 'usuarios', titulo: 'Usuarios', desc: 'Gestionar equipo',
@@ -591,8 +591,10 @@ function irAMenuRestaurante() {
         Usuarios.abrir();
       } else if (t.view === 'configuracion') {
         Configuracion.abrir();
-      } else if (t.view === 'auditoria') {
+    } else if (t.view === 'auditoria') {
         Auditoria.abrir();
+      } else if (t.view === 'balances') {
+        Balances.abrir();
       } else {
         showView(t.view);
       }
@@ -625,6 +627,7 @@ document.addEventListener('click', (e) => {
     if (typeof Anclaje !== 'undefined') Anclaje.desenganchar();
     if (typeof Usuarios !== 'undefined') Usuarios.desenganchar();
     if (typeof Auditoria !== 'undefined') Auditoria.desenganchar();
+    if (typeof Balances !== 'undefined') Balances.desenganchar();
     if (dest === 'inicio') irAInicio();
     else if (dest === 'restaurante') irAMenuRestaurante();
     else showView(dest);
@@ -5709,6 +5712,888 @@ const Auditoria = {
 };
 
 /* ============================================================
+   ============================================================
+   FASE 6 / BLOQUE L — VISTA BALANCES
+   ============================================================
+   Dashboard analítico del negocio con KPIs, charts SVG hechos a
+   mano, top productos / meseros / horas pico y bloque de insights
+   en lenguaje natural. Solo SUPER + CONTADOR.
+   ============================================================
+   ============================================================ */
+const Balances = {
+  periodoActivo: 'semana',
+  desde: '',
+  hasta: '',
+  data: null,
+  cargando: false,
+
+  async abrir() {
+    showView('balances');
+    this.aplicarPeriodo('semana', false);
+    await this.cargar();
+  },
+
+  // ── Períodos ────────────────────────────────────────────────────
+  aplicarPeriodo(periodo, recargar) {
+    this.periodoActivo = periodo;
+    const hoy = this.hoyYmd();
+    switch (periodo) {
+      case 'hoy':
+        this.desde = hoy; this.hasta = hoy; break;
+      case 'semana': {
+        // Lunes a hoy (si es lunes, solo el lunes). Si querían lun-dom siempre,
+        // habría que tomar lun de la semana actual hasta su domingo (puede ser futuro).
+        // Defaulteo a "lunes de esta semana → hoy" — más útil real-time.
+        const d = new Date();
+        const dow = d.getDay() || 7;   // 1..7 (lunes=1, domingo=7)
+        const lun = new Date(d);
+        lun.setDate(d.getDate() - (dow - 1));
+        this.desde = this.dateToYmd(lun);
+        this.hasta = hoy;
+        break;
+      }
+      case 'mes': {
+        const d = new Date();
+        d.setDate(1);
+        this.desde = this.dateToYmd(d);
+        this.hasta = hoy;
+        break;
+      }
+      case 'ano': {
+        const d = new Date();
+        this.desde = d.getFullYear() + '-01-01';
+        this.hasta = hoy;
+        break;
+      }
+    }
+    $$('.aud-chip', $('#bal-chips-periodo')).forEach(c => {
+      c.classList.toggle('is-active', c.dataset.periodo === periodo);
+    });
+    if (recargar) this.cargar();
+  },
+
+  abrirPickerCustom() {
+    Swal.fire({
+      title: 'Período personalizado',
+      html: `
+        <label>Desde</label>
+        <input id="bal-desde" type="date" value="${this.desde || ''}" />
+        <label>Hasta</label>
+        <input id="bal-hasta" type="date" value="${this.hasta || ''}" />`,
+      showCancelButton: true,
+      confirmButtonText: 'Aplicar',
+      cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      preConfirm: () => {
+        const d = $('#bal-desde').value;
+        const h = $('#bal-hasta').value;
+        if (!d || !h) { Swal.showValidationMessage('Llena ambas fechas'); return false; }
+        if (d > h) { Swal.showValidationMessage('Desde no puede ser mayor que hasta'); return false; }
+        return { d, h };
+      }
+    }).then(r => {
+      if (!r.isConfirmed) {
+        $$('.aud-chip', $('#bal-chips-periodo')).forEach(c => {
+          c.classList.toggle('is-active', c.dataset.periodo === this.periodoActivo);
+        });
+        return;
+      }
+      this.periodoActivo = 'custom';
+      this.desde = r.value.d;
+      this.hasta = r.value.h;
+      $$('.aud-chip', $('#bal-chips-periodo')).forEach(c => {
+        c.classList.toggle('is-active', c.dataset.periodo === 'custom');
+      });
+      this.cargar();
+    });
+  },
+
+  hoyYmd() {
+    return this.dateToYmd(new Date());
+  },
+  dateToYmd(d) {
+    return d.getFullYear() + '-' +
+           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+           String(d.getDate()).padStart(2, '0');
+  },
+  ymdToDate(s) {
+    if (!s) return null;
+    const [y, m, d] = s.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  },
+
+  labelPeriodo() {
+    const map = {
+      hoy:    'Hoy',
+      semana: 'Esta semana',
+      mes:    'Este mes',
+      ano:    'Este año',
+      custom: 'Período personalizado'
+    };
+    return map[this.periodoActivo] || '';
+  },
+
+  labelRango() {
+    if (!this.desde || !this.hasta) return '—';
+    const fmt = (s) => {
+      const [y, m, d] = s.split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      let str = dt.toLocaleDateString('es-CO', {
+        weekday: 'short', day: 'numeric', month: 'short'
+      });
+      return str.replace('.', '');
+    };
+    if (this.desde === this.hasta) {
+      const [y, m, d] = this.desde.split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      let str = dt.toLocaleDateString('es-CO', {
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+      });
+      return str.charAt(0).toUpperCase() + str.slice(1);
+    }
+    return fmt(this.desde) + ' → ' + fmt(this.hasta);
+  },
+
+  // ── Carga ───────────────────────────────────────────────────────
+  async cargar() {
+    if (this.cargando) return;
+    this.cargando = true;
+    this.pintarLoading();
+    $('#bal-period-label').textContent = this.labelPeriodo();
+    $('#bal-period-rango').textContent = this.labelRango();
+    try {
+      this.data = await apiPost('getBalance', withUser({
+        desde: this.desde,
+        hasta: this.hasta,
+        comparativo: true
+      }));
+      this.render();
+    } catch (e) {
+      this.pintarError(e.message);
+    } finally {
+      this.cargando = false;
+    }
+  },
+
+  pintarLoading() {
+    const cont = $('#bal-content');
+    if (cont) cont.innerHTML = `
+      <div class="aud-loading">
+        <div class="spinner">
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <p class="muted">Calculando balance…</p>
+      </div>`;
+  },
+
+  pintarError(msg) {
+    const cont = $('#bal-content');
+    if (cont) cont.innerHTML = `
+      <div class="card text-center">
+        <h3>Error al cargar</h3>
+        <p class="muted">${escapeHtml(msg || '')}</p>
+        <button class="btn btn-ghost mt-md" id="bal-btn-retry">Reintentar</button>
+      </div>`;
+    $('#bal-btn-retry')?.addEventListener('click', () => this.cargar());
+  },
+
+  render() {
+    const cont = $('#bal-content');
+    if (!cont || !this.data) return;
+    const d = this.data.actual;
+    if (d.totalPedidos === 0) {
+      cont.innerHTML = `
+        <div class="card text-center" style="margin-top:20px;">
+          <div style="font-size:2.4rem; opacity:0.4;">📊</div>
+          <h3>Sin ventas en este período</h3>
+          <p class="muted">No hay pedidos pagados entre ${escapeHtml(this.desde)} y ${escapeHtml(this.hasta)}.</p>
+        </div>`;
+      return;
+    }
+
+    cont.innerHTML = [
+      this.renderKpis(),
+      this.renderVentasPorDia(),
+      this.renderTopProductos(),
+      this.renderTopMeseros(),
+      this.renderHorasPico(),
+      this.renderMetodosPago(),
+      this.renderCategorias(),
+      this.renderClientes(),
+      this.renderInsights()
+    ].join('');
+
+    // Bind taps
+    $('#bal-ver-productos')?.addEventListener('click', () => this.abrirDetalleProductos());
+    $('#bal-ver-meseros')?.addEventListener('click', () => this.abrirDetalleMeseros());
+    $$('[data-bal-mesero]').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.dataset.balMesero;
+        const m = this.data.actual.topMeseros.find(x => x.id === id);
+        if (m) this.abrirDetalleMesero(m);
+      });
+    });
+  },
+
+  // ── Render: KPIs hero ───────────────────────────────────────────
+  renderKpis() {
+    const a = this.data.actual;
+    const ant = this.data.anterior;
+    const pctVentas  = this.pctCambio(a.totalVentas, ant?.totalVentas);
+    const pctPedidos = this.pctCambio(a.totalPedidos, ant?.totalPedidos);
+    const pctTicket  = this.pctCambio(a.ticketPromedio, ant?.ticketPromedio);
+    const totalMetodos = a.totalEfectivo + a.totalTransferencia;
+    const pctEfectivo = totalMetodos > 0 ? Math.round(a.totalEfectivo / totalMetodos * 100) : 0;
+    const pctTransfer = totalMetodos > 0 ? 100 - pctEfectivo : 0;
+
+    return `
+      <section class="bal-section bal-section--hero">
+        <div class="bal-kpi-hero">
+          <div class="bal-kpi-hero__icon">💰</div>
+          <div class="bal-kpi-hero__main">
+            <div class="bal-kpi-hero__lbl">Ventas totales</div>
+            <div class="bal-kpi-hero__val">${fmtPesos(a.totalVentas)}</div>
+            ${this.renderDelta(pctVentas, ant?.totalVentas, 'vs. período anterior')}
+          </div>
+        </div>
+        <div class="bal-kpi-grid">
+          <div class="bal-kpi">
+            <div class="bal-kpi__icon">🧾</div>
+            <div class="bal-kpi__val">${a.totalPedidos.toLocaleString('es-CO')}</div>
+            <div class="bal-kpi__lbl">Pedidos</div>
+            ${this.renderDeltaMini(pctPedidos)}
+          </div>
+          <div class="bal-kpi">
+            <div class="bal-kpi__icon">🎯</div>
+            <div class="bal-kpi__val">${fmtPesos(a.ticketPromedio)}</div>
+            <div class="bal-kpi__lbl">Ticket promedio</div>
+            ${this.renderDeltaMini(pctTicket)}
+          </div>
+          <div class="bal-kpi">
+            <div class="bal-kpi__icon">💵</div>
+            <div class="bal-kpi__val">${pctEfectivo}%</div>
+            <div class="bal-kpi__lbl">Efectivo</div>
+            <div class="bal-kpi__sub">${fmtPesos(a.totalEfectivo)}</div>
+          </div>
+          <div class="bal-kpi">
+            <div class="bal-kpi__icon">📱</div>
+            <div class="bal-kpi__val">${pctTransfer}%</div>
+            <div class="bal-kpi__lbl">Transferencia</div>
+            <div class="bal-kpi__sub">${fmtPesos(a.totalTransferencia)}</div>
+          </div>
+        </div>
+      </section>`;
+  },
+
+  pctCambio(actual, anterior) {
+    if (anterior == null) return null;
+    if (!anterior) return actual > 0 ? 999 : 0;
+    return Math.round(((actual - anterior) / anterior) * 100);
+  },
+
+  renderDelta(pct, valorAnterior, contexto) {
+    if (pct == null) return '';
+    const abs = Math.abs(pct);
+    const isUp = pct > 0;
+    const isFlat = pct === 0;
+    const cls = isFlat ? 'flat' : (isUp ? 'up' : 'down');
+    const arrow = isFlat ? '→' : (isUp ? '▲' : '▼');
+    const display = pct >= 999 ? '+∞' : (pct >= 0 ? '+' : '-') + abs + '%';
+    return `
+      <div class="bal-delta bal-delta--${cls}">
+        <span class="bal-delta__arrow">${arrow}</span>
+        <span class="bal-delta__pct">${display}</span>
+        <span class="bal-delta__ctx">${escapeHtml(contexto)}</span>
+      </div>`;
+  },
+
+  renderDeltaMini(pct) {
+    if (pct == null) return '';
+    const isUp = pct > 0;
+    const isFlat = pct === 0;
+    const cls = isFlat ? 'flat' : (isUp ? 'up' : 'down');
+    const arrow = isFlat ? '→' : (isUp ? '▲' : '▼');
+    const display = (pct >= 0 ? '+' : '-') + Math.abs(pct) + '%';
+    return `<div class="bal-delta-mini bal-delta-mini--${cls}">${arrow} ${display}</div>`;
+  },
+
+  // ── Render: Ventas por día (bar chart SVG) ─────────────────────
+  renderVentasPorDia() {
+    const serie = this.data.actual.serieVentas || [];
+    if (!serie.length) return '';
+    const max = Math.max(...serie.map(d => d.ventas), 1);
+    const mejor = this.data.actual.mejorDia;
+
+    const barW = 100 / serie.length;
+    const barras = serie.map((d, i) => {
+      const h = (d.ventas / max) * 100;
+      const x = i * barW;
+      const esBest = mejor && d.fecha === mejor.fecha;
+      const cls = esBest ? 'bal-bar--best' : '';
+      return `
+        <g class="bal-bar ${cls}" data-bal-day="${d.fecha}">
+          <rect x="${x + barW * 0.15}" y="${100 - h}"
+                width="${barW * 0.7}" height="${h}"
+                rx="2" ry="2" />
+          <title>${escapeHtml(this.diaCortoConFecha(d.fecha))}: ${fmtPesos(d.ventas)} · ${d.pedidos} ped</title>
+        </g>`;
+    }).join('');
+
+    const labels = serie.map((d, i) => {
+      const x = i * barW + barW / 2;
+      const lbl = this.diaCorto(d.fecha);
+      return `<text x="${x}" y="14" text-anchor="middle" class="bal-bar-lbl">${lbl}</text>`;
+    }).join('');
+
+    return `
+      <section class="bal-section">
+        <h3 class="bal-section__title">📈 Ventas por día</h3>
+        <div class="bal-chart-wrap">
+          <svg class="bal-chart" viewBox="0 0 100 110" preserveAspectRatio="none">
+            <g transform="translate(0, 0)">${barras}</g>
+          </svg>
+          <svg class="bal-chart-labels" viewBox="0 0 100 18" preserveAspectRatio="none">
+            ${labels}
+          </svg>
+        </div>
+        ${mejor ? `
+          <div class="bal-chart__hint">
+            🏆 Mejor día: <b>${this.diaLargoConFecha(mejor.fecha)}</b> con <b>${fmtPesos(mejor.ventas)}</b>
+          </div>` : ''}
+      </section>`;
+  },
+
+  diaCorto(ymd) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return ymd;
+    const [y, m, d] = ymd.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    const dias = ['D','L','M','M','J','V','S'];
+    return dias[dt.getDay()] + d;
+  },
+  diaCortoConFecha(ymd) {
+    const [y, m, d] = ymd.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    return dt.toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' });
+  },
+  diaLargoConFecha(ymd) {
+    const [y, m, d] = ymd.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    let s = dt.toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' });
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  },
+
+  // ── Render: Top productos ──────────────────────────────────────
+  renderTopProductos() {
+    const top = (this.data.actual.topProductos || []).slice(0, 5);
+    if (!top.length) return '';
+    const maxQty = Math.max(...top.map(p => p.cantidad), 1);
+    const medallas = ['🥇','🥈','🥉','4️⃣','5️⃣'];
+    return `
+      <section class="bal-section">
+        <div class="bal-section__head">
+          <h3 class="bal-section__title">🍽️ Top 5 productos</h3>
+          ${this.data.actual.topProductos.length > 5
+            ? `<button id="bal-ver-productos" class="bal-section__more">Ver todos ›</button>` : ''}
+        </div>
+        <div class="bal-rank-list">
+          ${top.map((p, i) => `
+            <div class="bal-rank-row">
+              <div class="bal-rank-row__medal">${medallas[i] || (i + 1)}</div>
+              <div class="bal-rank-row__main">
+                <div class="bal-rank-row__name">${escapeHtml(p.nombre)}</div>
+                <div class="bal-rank-row__bar">
+                  <div class="bal-rank-row__bar-fill" style="width:${(p.cantidad / maxQty * 100).toFixed(1)}%"></div>
+                </div>
+              </div>
+              <div class="bal-rank-row__qty">${p.cantidad}×</div>
+              <div class="bal-rank-row__amt">${fmtPesos(p.monto)}</div>
+            </div>`).join('')}
+        </div>
+      </section>`;
+  },
+
+  // ── Render: Top meseros ────────────────────────────────────────
+  renderTopMeseros() {
+    const top = (this.data.actual.topMeseros || []).slice(0, 5);
+    if (!top.length) return '';
+    return `
+      <section class="bal-section">
+        <div class="bal-section__head">
+          <h3 class="bal-section__title">👥 Top meseros</h3>
+          ${this.data.actual.topMeseros.length > 5
+            ? `<button id="bal-ver-meseros" class="bal-section__more">Ver todos ›</button>` : ''}
+        </div>
+        <div class="bal-meseros">
+          ${top.map((m, i) => {
+            const ini = this.iniciales(m.nombre);
+            const rolKey = String(m.rol || '').toLowerCase();
+            const img = m.fotoUrl
+              ? `<img class="bal-mesero__avatar-img" src="${escapeHtml(m.fotoUrl)}" alt="" onerror="this.remove()" />`
+              : '';
+            return `
+              <div class="bal-mesero" data-bal-mesero="${escapeHtml(m.id)}">
+                <div class="bal-mesero__rank">${i + 1}</div>
+                <div class="bal-mesero__avatar bal-mesero__avatar--${rolKey}">
+                  <span class="bal-mesero__avatar-txt">${escapeHtml(ini)}</span>
+                  ${img}
+                </div>
+                <div class="bal-mesero__body">
+                  <div class="bal-mesero__name">${escapeHtml(m.nombre)}</div>
+                  <div class="bal-mesero__meta">${m.pedidos} ped · ticket ${fmtPesos(m.ticketPromedio)}</div>
+                </div>
+                <div class="bal-mesero__ventas">${fmtPesos(m.ventas)}</div>
+              </div>`;
+          }).join('')}
+        </div>
+      </section>`;
+  },
+
+  iniciales(nombre) {
+    const partes = String(nombre || '?').trim().split(/\s+/);
+    if (!partes.length || !partes[0]) return '?';
+    if (partes.length === 1) return partes[0].charAt(0).toUpperCase();
+    return (partes[0].charAt(0) + partes[1].charAt(0)).toUpperCase();
+  },
+
+  // ── Render: Horas pico ─────────────────────────────────────────
+  renderHorasPico() {
+    const horas = (this.data.actual.horasPico || []).slice(0, 6);
+    if (!horas.length) return '';
+    const max = Math.max(...horas.map(h => h.cantidad), 1);
+    return `
+      <section class="bal-section">
+        <h3 class="bal-section__title">⏰ Horas pico</h3>
+        <div class="bal-horas">
+          ${horas.map(h => {
+            const pct = (h.cantidad / max * 100).toFixed(1);
+            return `
+              <div class="bal-hora-row">
+                <div class="bal-hora-row__lbl">${this.horaAmPm(h.hora)}</div>
+                <div class="bal-hora-row__bar">
+                  <div class="bal-hora-row__bar-fill" style="width:${pct}%"></div>
+                </div>
+                <div class="bal-hora-row__qty">${h.cantidad}</div>
+              </div>`;
+          }).join('')}
+        </div>
+        <div class="bal-chart__hint">
+          🔥 Hora más fuerte: <b>${this.horaAmPm(horas[0].hora)}</b> con <b>${horas[0].cantidad} pagos</b>
+        </div>
+      </section>`;
+  },
+
+  horaAmPm(hh) {
+    const h = parseInt(hh, 10);
+    if (isNaN(h)) return hh;
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h === 0 ? 12 : (h > 12 ? h - 12 : h);
+    return h12 + ':00 ' + ampm;
+  },
+
+  // ── Render: Métodos de pago (donut SVG) ────────────────────────
+  renderMetodosPago() {
+    const a = this.data.actual;
+    const total = a.totalEfectivo + a.totalTransferencia;
+    if (total <= 0) return '';
+    const pctEf = a.totalEfectivo / total;
+    const pctTr = 1 - pctEf;
+    // Donut: circunferencia = 2πr (r=42) ≈ 263.89
+    const r = 42, c = 2 * Math.PI * r;
+    const offsetEf = c * pctEf;
+    return `
+      <section class="bal-section">
+        <h3 class="bal-section__title">💳 Métodos de pago</h3>
+        <div class="bal-donut-wrap">
+          <svg viewBox="0 0 100 100" class="bal-donut">
+            <circle cx="50" cy="50" r="${r}" class="bal-donut__bg" />
+            <circle cx="50" cy="50" r="${r}" class="bal-donut__seg bal-donut__seg--ef"
+                    stroke-dasharray="${offsetEf} ${c}"
+                    transform="rotate(-90 50 50)" />
+            <circle cx="50" cy="50" r="${r}" class="bal-donut__seg bal-donut__seg--tr"
+                    stroke-dasharray="${c - offsetEf} ${c}"
+                    stroke-dashoffset="-${offsetEf}"
+                    transform="rotate(-90 50 50)" />
+            <text x="50" y="46" text-anchor="middle" class="bal-donut__total-lbl">Total</text>
+            <text x="50" y="58" text-anchor="middle" class="bal-donut__total-val">${fmtPesos(total)}</text>
+          </svg>
+          <div class="bal-donut-legend">
+            <div class="bal-donut-legend__row">
+              <span class="bal-donut-legend__dot bal-donut-legend__dot--ef"></span>
+              <span class="bal-donut-legend__lbl">💵 Efectivo</span>
+              <span class="bal-donut-legend__val">${fmtPesos(a.totalEfectivo)} <b>(${Math.round(pctEf * 100)}%)</b></span>
+            </div>
+            <div class="bal-donut-legend__row">
+              <span class="bal-donut-legend__dot bal-donut-legend__dot--tr"></span>
+              <span class="bal-donut-legend__lbl">📱 Transferencia</span>
+              <span class="bal-donut-legend__val">${fmtPesos(a.totalTransferencia)} <b>(${Math.round(pctTr * 100)}%)</b></span>
+            </div>
+          </div>
+        </div>
+      </section>`;
+  },
+
+  // ── Render: Categorías ─────────────────────────────────────────
+  renderCategorias() {
+    const cats = this.data.actual.ventasCategoria || [];
+    if (!cats.length) return '';
+    const max = Math.max(...cats.map(c => c.monto), 1);
+    return `
+      <section class="bal-section">
+        <h3 class="bal-section__title">📂 Ventas por categoría</h3>
+        <div class="bal-rank-list">
+          ${cats.map(c => `
+            <div class="bal-rank-row">
+              <div class="bal-rank-row__main">
+                <div class="bal-rank-row__name">${escapeHtml(c.nombre)}</div>
+                <div class="bal-rank-row__bar">
+                  <div class="bal-rank-row__bar-fill bal-rank-row__bar-fill--cat"
+                       style="width:${(c.monto / max * 100).toFixed(1)}%"></div>
+                </div>
+              </div>
+              <div class="bal-rank-row__amt">${fmtPesos(c.monto)}</div>
+            </div>`).join('')}
+        </div>
+      </section>`;
+  },
+
+  // ── Render: Clientes ───────────────────────────────────────────
+  renderClientes() {
+    const c = this.data.actual.clientes;
+    if (!c || !c.total) return '';
+    const pctConCli = c.total ? Math.round(c.conCliente / c.total * 100) : 0;
+    return `
+      <section class="bal-section">
+        <h3 class="bal-section__title">👤 Clientes</h3>
+        <div class="bal-clientes">
+          <div class="bal-clientes__row">
+            <span class="bal-clientes__icon">📊</span>
+            <span class="bal-clientes__lbl">Pedidos totales</span>
+            <span class="bal-clientes__val">${c.total}</span>
+          </div>
+          <div class="bal-clientes__row">
+            <span class="bal-clientes__icon">👻</span>
+            <span class="bal-clientes__lbl">Sin identificar</span>
+            <span class="bal-clientes__val">${c.sinCliente} <b>(${100 - pctConCli}%)</b></span>
+          </div>
+          <div class="bal-clientes__row">
+            <span class="bal-clientes__icon">✅</span>
+            <span class="bal-clientes__lbl">Identificados</span>
+            <span class="bal-clientes__val">${c.conCliente} <b>(${pctConCli}%)</b></span>
+          </div>
+          <div class="bal-clientes__row">
+            <span class="bal-clientes__icon">🆕</span>
+            <span class="bal-clientes__lbl">Clientes nuevos en el período</span>
+            <span class="bal-clientes__val">${c.nuevos}</span>
+          </div>
+          <div class="bal-clientes__row">
+            <span class="bal-clientes__icon">🔄</span>
+            <span class="bal-clientes__lbl">Clientes que volvieron</span>
+            <span class="bal-clientes__val">${c.recurrentes}</span>
+          </div>
+        </div>
+      </section>`;
+  },
+
+  // ── Render: Insights ───────────────────────────────────────────
+  renderInsights() {
+    const insights = this.generarInsights();
+    if (!insights.length) return '';
+    return `
+      <section class="bal-section bal-section--insights">
+        <h3 class="bal-section__title">💡 Insights</h3>
+        <ul class="bal-insights">
+          ${insights.map(i => `<li class="bal-insight bal-insight--${i.tipo}">${i.html}</li>`).join('')}
+        </ul>
+      </section>`;
+  },
+
+  generarInsights() {
+    const a = this.data.actual;
+    const ant = this.data.anterior;
+    const out = [];
+
+    // 1. Crecimiento de ventas
+    if (ant && ant.totalVentas > 0) {
+      const pct = Math.round(((a.totalVentas - ant.totalVentas) / ant.totalVentas) * 100);
+      if (pct >= 10) {
+        out.push({ tipo: 'ok', html: `🎉 Las ventas crecieron <b>${pct}%</b> vs el período anterior.` });
+      } else if (pct <= -10) {
+        out.push({ tipo: 'warn', html: `⚠️ Las ventas cayeron <b>${Math.abs(pct)}%</b> vs el período anterior. Vale la pena revisar qué cambió.` });
+      } else {
+        out.push({ tipo: 'info', html: `📊 Las ventas se mantuvieron estables (${pct >= 0 ? '+' : ''}${pct}%) vs el período anterior.` });
+      }
+    }
+
+    // 2. Mejor día vs promedio
+    if (a.mejorDia && a.serieVentas.length > 1) {
+      const promedio = a.totalVentas / a.serieVentas.length;
+      if (promedio > 0) {
+        const factor = a.mejorDia.ventas / promedio;
+        if (factor >= 1.5) {
+          out.push({
+            tipo: 'info',
+            html: `🏆 El ${this.diaLargoConFecha(a.mejorDia.fecha)} vendió <b>${factor.toFixed(1)}× más</b> que un día promedio. ¿Qué hizo diferente ese día?`
+          });
+        }
+      }
+    }
+
+    // 3. Producto estrella
+    if (a.topProductos.length >= 2) {
+      const p1 = a.topProductos[0];
+      const p2 = a.topProductos[1];
+      if (p2.cantidad > 0) {
+        const factor = p1.cantidad / p2.cantidad;
+        if (factor >= 2) {
+          out.push({
+            tipo: 'info',
+            html: `⭐ <b>${escapeHtml(p1.nombre)}</b> vendió <b>${factor.toFixed(1)}× más</b> que el segundo más vendido. Es tu producto estrella.`
+          });
+        }
+      }
+    }
+
+    // 4. Proyección: si cada día fuera como el mejor
+    if (a.mejorDia && a.serieVentas.length > 1) {
+      const proyectado = a.mejorDia.ventas * a.serieVentas.length;
+      if (proyectado > a.totalVentas) {
+        out.push({
+          tipo: 'idea',
+          html: `🚀 Si todos los días fueran como tu mejor día, ganarías <b>${fmtPesos(proyectado)}</b> en este período.`
+        });
+      }
+    }
+
+    // 5. Identificación de clientes
+    if (a.clientes && a.clientes.total > 0) {
+      const pct = Math.round(a.clientes.conCliente / a.clientes.total * 100);
+      if (pct < 20) {
+        out.push({
+          tipo: 'warn',
+          html: `📞 Solo <b>${pct}%</b> de pedidos quedaron con cliente identificado. Más identificación = más WhatsApps y fidelización.`
+        });
+      } else if (pct >= 50) {
+        out.push({
+          tipo: 'ok',
+          html: `📞 Identificaste al <b>${pct}%</b> de los clientes. Excelente para construir base de datos y fidelizar.`
+        });
+      }
+    }
+
+    // 6. Concentración top mesero
+    if (a.topMeseros.length >= 2 && a.totalVentas > 0) {
+      const topMesero = a.topMeseros[0];
+      const pct = Math.round(topMesero.ventas / a.totalVentas * 100);
+      if (pct >= 40) {
+        out.push({
+          tipo: 'info',
+          html: `🌟 <b>${escapeHtml(topMesero.nombre.split(' ')[0])}</b> generó el <b>${pct}%</b> de las ventas. Mesero clave.`
+        });
+      }
+    }
+
+    return out;
+  },
+
+  // ── Modales de detalle ─────────────────────────────────────────
+  abrirDetalleProductos() {
+    const top = this.data.actual.topProductos || [];
+    const maxQty = Math.max(...top.map(p => p.cantidad), 1);
+    Swal.fire({
+      title: '🍽️ Todos los productos',
+      html: `
+        <div class="bal-rank-list bal-rank-list--modal">
+          ${top.map((p, i) => `
+            <div class="bal-rank-row">
+              <div class="bal-rank-row__medal">${i + 1}</div>
+              <div class="bal-rank-row__main">
+                <div class="bal-rank-row__name">${escapeHtml(p.nombre)}</div>
+                <div class="bal-rank-row__bar">
+                  <div class="bal-rank-row__bar-fill" style="width:${(p.cantidad / maxQty * 100).toFixed(1)}%"></div>
+                </div>
+              </div>
+              <div class="bal-rank-row__qty">${p.cantidad}×</div>
+              <div class="bal-rank-row__amt">${fmtPesos(p.monto)}</div>
+            </div>`).join('')}
+        </div>`,
+      width: 560,
+      confirmButtonText: 'Cerrar'
+    });
+  },
+
+  abrirDetalleMeseros() {
+    const top = this.data.actual.topMeseros || [];
+    Swal.fire({
+      title: '👥 Todos los meseros',
+      html: `
+        <div class="bal-meseros bal-meseros--modal">
+          ${top.map((m, i) => {
+            const ini = this.iniciales(m.nombre);
+            const rolKey = String(m.rol || '').toLowerCase();
+            const img = m.fotoUrl
+              ? `<img class="bal-mesero__avatar-img" src="${escapeHtml(m.fotoUrl)}" alt="" onerror="this.remove()" />`
+              : '';
+            return `
+              <div class="bal-mesero">
+                <div class="bal-mesero__rank">${i + 1}</div>
+                <div class="bal-mesero__avatar bal-mesero__avatar--${rolKey}">
+                  <span class="bal-mesero__avatar-txt">${escapeHtml(ini)}</span>
+                  ${img}
+                </div>
+                <div class="bal-mesero__body">
+                  <div class="bal-mesero__name">${escapeHtml(m.nombre)}</div>
+                  <div class="bal-mesero__meta">${m.pedidos} ped · ticket ${fmtPesos(m.ticketPromedio)}</div>
+                </div>
+                <div class="bal-mesero__ventas">${fmtPesos(m.ventas)}</div>
+              </div>`;
+          }).join('')}
+        </div>`,
+      width: 560,
+      confirmButtonText: 'Cerrar'
+    });
+  },
+
+  abrirDetalleMesero(m) {
+    const totalVentas = this.data.actual.totalVentas || 0;
+    const pct = totalVentas > 0 ? Math.round(m.ventas / totalVentas * 100) : 0;
+    const ini = this.iniciales(m.nombre);
+    const rolKey = String(m.rol || '').toLowerCase();
+    const img = m.fotoUrl
+      ? `<img class="bal-mesero__avatar-img" src="${escapeHtml(m.fotoUrl)}" alt="" onerror="this.remove()" />`
+      : '';
+    Swal.fire({
+      title: m.nombre,
+      html: `
+        <div class="bal-mesero-detalle">
+          <div class="bal-mesero-detalle__head">
+            <div class="bal-mesero__avatar bal-mesero__avatar--${rolKey}" style="width:64px;height:64px;font-size:1.2rem;">
+              <span class="bal-mesero__avatar-txt">${escapeHtml(ini)}</span>
+              ${img}
+            </div>
+            <div class="bal-mesero-detalle__rol">${escapeHtml(m.rol || '')}</div>
+          </div>
+          <div class="bal-mesero-detalle__kpis">
+            <div class="bal-kpi">
+              <div class="bal-kpi__val">${fmtPesos(m.ventas)}</div>
+              <div class="bal-kpi__lbl">Ventas totales</div>
+              <div class="bal-kpi__sub">${pct}% del total</div>
+            </div>
+            <div class="bal-kpi">
+              <div class="bal-kpi__val">${m.pedidos}</div>
+              <div class="bal-kpi__lbl">Pedidos</div>
+            </div>
+            <div class="bal-kpi">
+              <div class="bal-kpi__val">${fmtPesos(m.ticketPromedio)}</div>
+              <div class="bal-kpi__lbl">Ticket prom.</div>
+            </div>
+          </div>
+        </div>`,
+      width: 480,
+      confirmButtonText: 'Cerrar'
+    });
+  },
+
+  // ── CSV ─────────────────────────────────────────────────────────
+  exportarCSV() {
+    if (!this.data) {
+      Toast && Toast.fire({ icon: 'info', title: 'Nada para exportar' });
+      return;
+    }
+    const a = this.data.actual;
+    const ant = this.data.anterior;
+    const escapar = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    const filas = [];
+    const sec = (titulo) => filas.push('', '"=== ' + titulo + ' ==="');
+
+    filas.push(escapar('REPORTE DE BALANCE'));
+    filas.push(escapar('Período') + ',' + escapar(this.desde + ' → ' + this.hasta));
+
+    sec('KPIs PRINCIPALES');
+    filas.push(['Métrica','Actual','Anterior','% Cambio'].map(escapar).join(','));
+    const rowKpi = (lbl, vActual, vAnt) => {
+      const pct = this.pctCambio(vActual, vAnt);
+      filas.push([lbl, vActual, vAnt == null ? '' : vAnt,
+                  pct == null ? '' : ((pct >= 0 ? '+' : '') + pct + '%')].map(escapar).join(','));
+    };
+    rowKpi('Ventas totales',  a.totalVentas,    ant?.totalVentas);
+    rowKpi('Pedidos',         a.totalPedidos,   ant?.totalPedidos);
+    rowKpi('Ticket promedio', a.ticketPromedio, ant?.ticketPromedio);
+    rowKpi('Efectivo',        a.totalEfectivo,  ant?.totalEfectivo);
+    rowKpi('Transferencia',   a.totalTransferencia, ant?.totalTransferencia);
+    rowKpi('Descuentos',      a.totalDescuentos, null);
+
+    sec('VENTAS POR DÍA');
+    filas.push(['Fecha','Ventas','Pedidos'].map(escapar).join(','));
+    a.serieVentas.forEach(d => filas.push([d.fecha, d.ventas, d.pedidos].map(escapar).join(',')));
+
+    sec('TOP PRODUCTOS');
+    filas.push(['Producto','Cantidad','Monto'].map(escapar).join(','));
+    a.topProductos.forEach(p => filas.push([p.nombre, p.cantidad, p.monto].map(escapar).join(',')));
+
+    sec('TOP MESEROS');
+    filas.push(['Mesero','Pedidos','Ventas','Ticket Promedio'].map(escapar).join(','));
+    a.topMeseros.forEach(m => filas.push([m.nombre, m.pedidos, m.ventas, m.ticketPromedio].map(escapar).join(',')));
+
+    sec('VENTAS POR CATEGORÍA');
+    filas.push(['Categoría','Cantidad','Monto'].map(escapar).join(','));
+    a.ventasCategoria.forEach(c => filas.push([c.nombre, c.cantidad, c.monto].map(escapar).join(',')));
+
+    sec('HORAS PICO');
+    filas.push(['Hora','Cantidad'].map(escapar).join(','));
+    a.horasPico.forEach(h => filas.push([h.hora + ':00', h.cantidad].map(escapar).join(',')));
+
+    sec('CLIENTES');
+    if (a.clientes) {
+      filas.push(['Total pedidos', a.clientes.total].map(escapar).join(','));
+      filas.push(['Identificados', a.clientes.conCliente].map(escapar).join(','));
+      filas.push(['Sin identificar', a.clientes.sinCliente].map(escapar).join(','));
+      filas.push(['Únicos', a.clientes.unicos].map(escapar).join(','));
+      filas.push(['Nuevos', a.clientes.nuevos].map(escapar).join(','));
+      filas.push(['Recurrentes', a.clientes.recurrentes].map(escapar).join(','));
+    }
+
+    const blob = new Blob(['\ufeff' + filas.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'balance_' + this.desde.replace(/-/g, '') + '_a_' + this.hasta.replace(/-/g, '') + '.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    Toast && Toast.fire({ icon: 'success', title: 'CSV descargado' });
+  },
+
+  desenganchar() { /* sin listeners persistentes */ },
+
+  setupListeners() {
+    // Chips de período
+    $$('.aud-chip', $('#bal-chips-periodo')).forEach(c => {
+      if (c._bound) return;
+      c._bound = true;
+      c.addEventListener('click', () => {
+        const p = c.dataset.periodo;
+        if (p === 'custom') return this.abrirPickerCustom();
+        this.aplicarPeriodo(p, true);
+      });
+    });
+    // Refresh
+    const r = $('#bal-refresh');
+    if (r && !r._bound) {
+      r._bound = true;
+      r.addEventListener('click', () => this.cargar());
+    }
+    // CSV
+    const csv = $('#bal-csv');
+    if (csv && !csv._bound) {
+      csv._bound = true;
+      csv.addEventListener('click', () => this.exportarCSV());
+    }
+  }
+};
+
+/* ============================================================
    INICIALIZACIÓN
    ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
@@ -5733,4 +6618,5 @@ window.addEventListener('DOMContentLoaded', () => {
   Configuracion.setupListeners();
 // Fase 6
   Auditoria.setupListeners();
+  Balances.setupListeners();
 });
