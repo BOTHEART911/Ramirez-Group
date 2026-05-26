@@ -3244,6 +3244,38 @@ textarea { resize: vertical; min-height: 80px; }
   z-index: 1;
 }
 
+/* Bloque I — Banner inline dentro del modal de usuario.
+   Mismo patrón que .cobro__banner-ticket (Fase 4). */
+.usr-modal__banner {
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  font-weight: 700;
+  font-size: 0.88rem;
+  text-align: center;
+  margin-bottom: 12px;
+  animation: viewIn 0.22s ease-out;
+  transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+}
+.usr-modal__banner.is-fading {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+.usr-modal__banner--ok {
+  background: rgba(22, 163, 74, 0.12);
+  color: var(--ok);
+  border: 1.5px solid var(--ok);
+}
+.usr-modal__banner--warn {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+  border: 1.5px solid var(--warn);
+}
+.usr-modal__banner--err {
+  background: rgba(220, 38, 38, 0.10);
+  color: var(--error);
+  border: 1.5px solid var(--error);
+}
+
 .usr-card__body { min-width: 0; }
 .usr-card__head {
   display: flex;
