@@ -591,6 +591,52 @@
     </div>
   </section>
 
+ <!-- ============================================================
+       VISTA BALANCES  (Fase 6 / Bloque L)
+       ============================================================ -->
+  <section id="view-balances" class="view">
+    <header class="app-header">
+      <button class="app-header__back" data-go="restaurante" title="Volver">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"/>
+          <polyline points="12 19 5 12 12 5"/>
+        </svg>
+      </button>
+      <h1 class="app-header__title">Balances</h1>
+      <button id="bal-refresh" class="app-header__icon" title="Actualizar">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/>
+          <polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+      </button>
+    </header>
+    <div class="container">
+      <!-- Período activo + acciones -->
+      <div class="bal-period-bar">
+        <div class="bal-period-bar__info">
+          <div class="bal-period-bar__label" id="bal-period-label">—</div>
+          <div class="bal-period-bar__rango" id="bal-period-rango">—</div>
+        </div>
+        <button id="bal-csv" class="aud-btn-csv" title="Exportar CSV">📥 CSV</button>
+      </div>
+
+      <!-- Chips de período -->
+      <div class="aud-chips" id="bal-chips-periodo">
+        <button class="aud-chip"           data-periodo="hoy">Hoy</button>
+        <button class="aud-chip is-active" data-periodo="semana">Semana</button>
+        <button class="aud-chip"           data-periodo="mes">Mes</button>
+        <button class="aud-chip"           data-periodo="ano">Año</button>
+        <button class="aud-chip aud-chip--custom" data-periodo="custom">📅</button>
+      </div>
+
+      <!-- Cuerpo dinámico -->
+      <div id="bal-content" class="bal-content"></div>
+    </div>
+  </section>
+
   <!-- ============================================================
        VISTAS PLACEHOLDER (Fases siguientes)
        ============================================================ -->
