@@ -39,7 +39,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(fetch(req, { cache: 'no-store' }).catch(() => new Response('{}', { headers: { 'Content-Type': 'application/json' } })));
     return;
   }
-
+ 
   // HTML, JS y CSS: network-first (red primero, caché como respaldo)
   const isAppShell = /\.(html|js|css)$/.test(url.pathname) || url.pathname.endsWith('/');
   if (isAppShell && url.origin === location.origin) {
