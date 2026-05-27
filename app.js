@@ -225,7 +225,21 @@ function clearInstalledMark() {
   try { localStorage.removeItem('pwaInstalledFlag'); } catch(_) {}
 }
 async function detectInstalled() {
-  if (isStandalone()) return true;
+  // Defensa: si por alguna razón isStandalone no está definido (caché viejo
+  // del SW sirviendo una versión incompleta), evaluamos inline en lugar de fallar.
+  let standalone = false;
+  try {
+    if (typeof isStandalone === 'function') {
+      standalone = isStandalone();
+    } else {
+      standalone =
+        window.matchMedia('(display-mode: standalone)').matches ||
+        window.matchMedia('(display-mode: installed)').matches ||
+        (window.navigator.standalone === true);
+    }
+  } catch (_) {}
+  if (standalone) return true;
+
   if (typeof navigator.getInstalledRelatedApps === 'function') {
     try {
       const apps = await navigator.getInstalledRelatedApps();
