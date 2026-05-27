@@ -12,7 +12,14 @@
   "capture_links": "existing-client-navigate",
   "launch_handler": { "client_mode": "navigate-existing" },
 
-  "prefer_related_applications": false,
+   "prefer_related_applications": false,
+  "related_applications": [
+    {
+      "platform": "webapp",
+      "url": "https://botheart911.github.io/Ramirez-Group/manifest.webmanifest",
+      "id": "/supervision/"
+    }
+  ],
 
   "icons": [
     {
