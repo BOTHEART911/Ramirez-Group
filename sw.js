@@ -16,9 +16,7 @@ const APP_SHELL = [
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache =>
-      cache.addAll(APP_SHELL).catch(() => {})
-    )
+    caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL).catch(() => {}))
   );
 });
 
@@ -36,29 +34,25 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url);
 
-  // version.json: siempre red, nunca cache
+  // version.json SIEMPRE desde la red, nunca caché
   if (url.pathname.endsWith('/version.json')) {
-    event.respondWith(
-      fetch(req, { cache: 'no-store' }).catch(() =>
-        new Response('{}', { headers: { 'Content-Type': 'application/json' } })
-      )
-    );
+    event.respondWith(fetch(req, { cache: 'no-store' }).catch(() => new Response('{}', { headers: { 'Content-Type': 'application/json' } })));
     return;
   }
 
-  // App shell: network-first
-  const isShell = /\.(html|js|css)$/.test(url.pathname) || url.pathname.endsWith('/');
-  if (isShell && url.origin === location.origin) {
+  // HTML, JS y CSS: network-first (red primero, caché como respaldo)
+  const isAppShell = /\.(html|js|css)$/.test(url.pathname) || url.pathname.endsWith('/');
+  if (isAppShell && url.origin === location.origin) {
     event.respondWith(
       fetch(req).then(res => {
         const copy = res.clone();
-        caches.open(CACHE_NAME).then(c => c.put(req, copy)).catch(() => {});
+        caches.open(CACHE_NAME).then(cache => cache.put(req, copy)).catch(() => {});
         return res;
       }).catch(() => caches.match(req))
     );
     return;
   }
 
-  // Resto (imágenes, fonts CDN): network con fallback a cache
+  // Resto: red con fallback a caché
   event.respondWith(fetch(req).catch(() => caches.match(req)));
 });
