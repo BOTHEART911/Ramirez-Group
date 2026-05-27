@@ -638,6 +638,69 @@
   </section>
 
   <!-- ============================================================
+       VISTA RESERVAS  (Fase 7 / Bloque Q)
+       ============================================================ -->
+  <section id="view-reservas" class="view">
+    <header class="app-header">
+      <button class="app-header__back" data-go="restaurante" title="Volver">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"/>
+          <polyline points="12 19 5 12 12 5"/>
+        </svg>
+      </button>
+      <h1 class="app-header__title">Reservas</h1>
+      <button id="res-refresh" class="app-header__icon" title="Actualizar">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/>
+          <polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+      </button>
+    </header>
+    <div class="container">
+      <!-- Toolbar: stats + CSV -->
+      <div class="aud-stats">
+        <div class="aud-stats__count"><span id="res-stats-count">—</span></div>
+        <div class="aud-stats__period" id="res-stats-period">—</div>
+        <button id="res-csv" class="aud-btn-csv" title="Exportar CSV">📥 CSV</button>
+      </div>
+
+      <!-- Banner amarillo de pendientes (pulsante) -->
+      <div id="res-banner-pendientes" class="res-banner hidden"></div>
+
+      <!-- Hero card del día -->
+      <div id="res-hero-hoy" class="res-hero hidden"></div>
+
+      <!-- Chips de período -->
+      <div class="aud-chips" id="res-chips-periodo">
+        <button class="aud-chip is-active" data-res-periodo="hoy">Hoy</button>
+        <button class="aud-chip"           data-res-periodo="semana">Semana</button>
+        <button class="aud-chip"           data-res-periodo="mes">Mes</button>
+        <button class="aud-chip"           data-res-periodo="todo">Todo</button>
+        <button class="aud-chip aud-chip--custom" data-res-periodo="custom">📅</button>
+      </div>
+
+      <!-- Toggle Lista / Calendario -->
+      <div class="res-vista-toggle">
+        <button class="res-vista-toggle__btn is-active" data-res-vista="lista">
+          <span>📋</span> Lista
+        </button>
+        <button class="res-vista-toggle__btn" data-res-vista="calendario">
+          <span>📅</span> Calendario
+        </button>
+      </div>
+
+      <!-- Pills filtro estado con conteo -->
+      <div class="res-pills" id="res-pills-estado"></div>
+
+      <!-- Cuerpo dinámico -->
+      <div id="res-content" class="res-content"></div>
+    </div>
+  </section>
+
+  <!-- ============================================================
        VISTAS PLACEHOLDER (Fases siguientes)
        ============================================================ -->
   <section id="view-pendiente" class="view">
