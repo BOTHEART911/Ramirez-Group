@@ -268,7 +268,7 @@ function iniciarSesion() {
 /* Auto-update: revisa version.json cada 5 min */
 async function checkVersion() {
   try {
-    const r = await fetch('./version.json?t=' + Date.now(), { cache: 'no-store' });
+    const r = await fetch('./version.js?t=' + Date.now(), { cache: 'no-store' });
     if (!r.ok) return;
     const j = await r.json();
     if (j.version && j.version !== APP_VERSION) {
