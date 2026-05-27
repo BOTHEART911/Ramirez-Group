@@ -4,7 +4,7 @@
  * version.json siempre desde la red (para detectar updates).
  */
 
-const CACHE_NAME = 'ramirez-group-v1';
+const CACHE_NAME = 'ramirez-group-v2';
 const APP_SHELL = [
   './',
   './index.html',
