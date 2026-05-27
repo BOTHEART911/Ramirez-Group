@@ -286,8 +286,10 @@ async function checkVersion() {
     }
     const numEl1 = $('#app-version-number');
     const numEl2 = $('#app-version-number-2');
+    const numEl3 = $('#app-version-number-3');
     if (numEl1) numEl1.textContent = APP_VERSION;
     if (numEl2) numEl2.textContent = APP_VERSION;
+    if (numEl3) numEl3.textContent = APP_VERSION;
   } catch (e) { /* silencioso */ }
 }
 
