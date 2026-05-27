@@ -4569,3 +4569,679 @@ textarea { resize: vertical; min-height: 80px; }
 .bal-insight--warn { border-left-color: var(--warn); }
 .bal-insight--info { border-left-color: var(--info); }
 .bal-insight--idea { border-left-color: var(--accent); }
+
+/* ============================================================
+   ============================================================
+   FASE 7 / BLOQUE Q — VISTA RESERVAS
+   ============================================================
+   ============================================================ */
+#view-reservas .container { padding-bottom: 60px; }
+
+/* Badge rojo en el tile del menú principal */
+.menu-tile { position: relative; }
+.menu-tile__badge {
+  position: absolute;
+  top: 10px; right: 10px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--error);
+  color: #fff;
+  font-family: var(--font-body);
+  font-weight: 800;
+  font-size: 0.74rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.45);
+  animation: badgePop 0.4s cubic-bezier(0.32, 1.6, 0.56, 1);
+  z-index: 2;
+}
+@keyframes badgePop {
+  from { opacity: 0; transform: scale(0.4); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* Banner amarillo de pendientes */
+.res-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  margin: 12px 0;
+  background: linear-gradient(135deg, #fde68a 0%, #fbbf24 100%);
+  border-left: 4px solid #b45309;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  animation: bannerPulse 2.2s ease-in-out infinite;
+  transition: transform 0.12s;
+}
+.res-banner:active { transform: scale(0.98); }
+@keyframes bannerPulse {
+  0%, 100% { box-shadow: 0 2px 8px rgba(180, 83, 9, 0.20); }
+  50%      { box-shadow: 0 4px 18px rgba(180, 83, 9, 0.45); }
+}
+.res-banner__icon { font-size: 1.5rem; flex-shrink: 0; }
+.res-banner__body { flex: 1; min-width: 0; }
+.res-banner__body strong {
+  display: block;
+  color: #422006;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1rem;
+}
+.res-banner__cta {
+  font-size: 0.78rem;
+  color: #78350f;
+  font-weight: 600;
+}
+
+/* Hero card del día */
+.res-hero {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-2) 100%);
+  color: #fff;
+  border-radius: var(--r-lg);
+  padding: 18px 20px;
+  margin: 14px 0;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--sh-md);
+}
+.res-hero::after {
+  content: '';
+  position: absolute;
+  top: -40%;
+  right: -10%;
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(circle, var(--accent-light) 0%, transparent 70%);
+  opacity: 0.22;
+  pointer-events: none;
+}
+.res-hero__head { position: relative; margin-bottom: 12px; }
+.res-hero__lbl {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+  opacity: 0.78;
+  margin-bottom: 2px;
+}
+.res-hero__fecha {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(1.1rem, 4vw, 1.4rem);
+  color: #fff !important;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.res-hero__stats {
+  display: flex;
+  gap: 18px;
+  position: relative;
+  margin-bottom: 10px;
+}
+.res-hero__stat {
+  display: flex;
+  flex-direction: column;
+}
+.res-hero__stat-num {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.8rem;
+  line-height: 1;
+  color: var(--accent-light);
+}
+.res-hero__stat-lbl {
+  font-size: 0.74rem;
+  font-weight: 600;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+.res-hero__timeline {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+  position: relative;
+}
+.res-hero__tl-time {
+  background: rgba(255, 255, 255, 0.18);
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-family: 'IBM Plex Mono', 'Courier New', monospace;
+}
+.res-hero__proxima {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: var(--r-sm);
+  font-size: 0.84rem;
+  position: relative;
+}
+.res-hero__proxima b {
+  color: var(--accent-light);
+  font-family: var(--font-display);
+  font-weight: 800;
+}
+
+/* Toggle Lista / Calendario */
+.res-vista-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-soft);
+  padding: 4px;
+  border-radius: var(--r-pill);
+  margin-bottom: 10px;
+}
+.res-vista-toggle__btn {
+  flex: 1;
+  padding: 8px;
+  border-radius: var(--r-pill);
+  font-weight: 700;
+  font-size: 0.84rem;
+  color: var(--text-soft);
+  transition: all 0.18s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.res-vista-toggle__btn span { font-size: 1rem; }
+.res-vista-toggle__btn.is-active {
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(6, 64, 43, 0.22);
+}
+
+/* Pills de estado con conteo (basadas en .aud-pill pero con colores
+   semánticos según el estado) */
+.res-pills {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 0 8px;
+  margin-bottom: 4px;
+  scrollbar-width: none;
+}
+.res-pills::-webkit-scrollbar { display: none; }
+.res-pill {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--r-pill);
+  background: var(--bg-card);
+  border: 1.5px solid var(--border-strong);
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--text-soft);
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.res-pill:hover { border-color: var(--primary); color: var(--primary); }
+.res-pill__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: rgba(0, 0, 0, 0.08);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+.res-pill.is-active { color: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); }
+.res-pill.is-active .res-pill__count { background: rgba(255, 255, 255, 0.25); }
+.res-pill.is-active.res-pill--pendiente  { background: var(--warn); border-color: var(--warn); color: #422006; }
+.res-pill.is-active.res-pill--pendiente .res-pill__count { background: rgba(0,0,0,0.15); color: #422006; }
+.res-pill.is-active.res-pill--confirmada { background: var(--ok);    border-color: var(--ok); }
+.res-pill.is-active.res-pill--rechazada  { background: var(--error); border-color: var(--error); }
+.res-pill.is-active.res-pill--cancelada  { background: var(--info);  border-color: var(--info); }
+.res-pill.is-active.res-pill--cumplida   { background: var(--text-muted); border-color: var(--text-muted); }
+.res-pill.is-active.res-pill--noshow     { background: #1f2937; border-color: #1f2937; }
+/* "Todos" cuando activo */
+.res-pill.is-active:not([class*="res-pill--"]) {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+/* Día grouping */
+.res-dia {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  box-shadow: var(--sh-sm);
+  margin-bottom: 12px;
+}
+.res-dia__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-2) 100%);
+  color: #fff;
+}
+.res-dia__icon { font-size: 0.95rem; }
+.res-dia__lbl {
+  flex: 1;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.92rem;
+  letter-spacing: 0.3px;
+}
+.res-dia__count {
+  background: rgba(255, 255, 255, 0.20);
+  padding: 2px 10px;
+  border-radius: var(--r-pill);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.res-dia__body {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Cards de reserva con border-left de color por estado */
+.res-card {
+  display: grid;
+  grid-template-columns: 76px 1fr auto;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left-width: 5px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.15s;
+  align-items: center;
+}
+.res-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--sh-md);
+}
+.res-card--pendiente  { border-left-color: var(--warn); animation: cardPulsePend 2.4s ease-in-out infinite; }
+.res-card--confirmada { border-left-color: var(--ok); }
+.res-card--rechazada  { border-left-color: var(--error); opacity: 0.7; }
+.res-card--cancelada  { border-left-color: var(--info); opacity: 0.7; }
+.res-card--cumplida   { border-left-color: var(--text-muted); opacity: 0.7; }
+.res-card--noshow     { border-left-color: #1f2937; opacity: 0.6; }
+@keyframes cardPulsePend {
+  0%, 100% { box-shadow: var(--sh-sm); }
+  50%      { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18), var(--sh-md); }
+}
+
+.res-card__hora {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 0.95rem;
+  color: var(--primary);
+  text-align: center;
+  background: var(--bg-soft);
+  padding: 8px 4px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+.res-card__body { min-width: 0; }
+.res-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.res-card__name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--primary);
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.res-card__personas {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+}
+.res-card__tipo,
+.res-card__tel,
+.res-card__mesa {
+  font-size: 0.78rem;
+  color: var(--text-soft);
+  line-height: 1.4;
+}
+.res-card__mesa {
+  font-weight: 700;
+  color: var(--primary);
+  margin-top: 2px;
+}
+
+/* Quick actions ✓✕ en cards PENDIENTE */
+.res-card__quick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.res-card__quick-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 1rem;
+  transition: transform 0.1s, background 0.15s, color 0.15s;
+  border: 1.5px solid transparent;
+}
+.res-card__quick-btn:active { transform: scale(0.9); }
+.res-card__quick-btn--ok {
+  background: rgba(22, 163, 74, 0.12);
+  color: var(--ok);
+  border-color: rgba(22, 163, 74, 0.40);
+}
+.res-card__quick-btn--ok:hover { background: var(--ok); color: #fff; }
+.res-card__quick-btn--cancel {
+  background: rgba(220, 38, 38, 0.10);
+  color: var(--error);
+  border-color: rgba(220, 38, 38, 0.40);
+}
+.res-card__quick-btn--cancel:hover { background: var(--error); color: #fff; }
+
+/* Calendario mensual (CSS grid, sin librería) */
+.res-cal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 14px;
+  box-shadow: var(--sh-sm);
+  margin-top: 8px;
+}
+.res-cal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.res-cal__nav {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 1.3rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.res-cal__nav:hover { background: var(--primary); color: #fff; }
+.res-cal__title {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1rem;
+  color: var(--primary);
+  margin: 0;
+}
+.res-cal__dow {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.res-cal__dow-cell {
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-align: center;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 0;
+}
+.res-cal__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.res-cal__cell {
+  aspect-ratio: 1;
+  padding: 4px;
+  border-radius: var(--r-sm);
+  background: var(--bg-soft);
+  border: 1.5px solid transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  transition: background 0.15s, border-color 0.15s, transform 0.08s;
+}
+.res-cal__cell--empty { background: transparent; cursor: default; }
+.res-cal__cell--has { cursor: pointer; }
+.res-cal__cell--has:hover {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+}
+.res-cal__cell--has:active { transform: scale(0.94); }
+.res-cal__cell.is-hoy {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.res-cal__cell-num {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--primary);
+}
+.res-cal__cell-dots {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+}
+.res-cal__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.res-cal__dot--pendiente  { background: var(--warn); }
+.res-cal__dot--confirmada { background: var(--ok); }
+.res-cal__dot--rechazada  { background: var(--error); }
+.res-cal__dot--cancelada  { background: var(--info); }
+.res-cal__dot--cumplida   { background: var(--text-muted); }
+.res-cal__dot--noshow     { background: #1f2937; }
+.res-cal__dot-more {
+  font-size: 0.62rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  margin-left: 2px;
+}
+
+/* Modal de día del calendario */
+.res-cal-day-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 60vh;
+  overflow-y: auto;
+  text-align: left;
+}
+.res-cal-day-item {
+  display: grid;
+  grid-template-columns: 80px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  text-align: left;
+}
+.res-cal-day-item:hover {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.res-cal-day-item__hora {
+  font-family: var(--font-display);
+  font-weight: 800;
+  color: var(--primary);
+  font-size: 0.92rem;
+}
+.res-cal-day-item__name {
+  font-weight: 600;
+  color: var(--text-main);
+  font-size: 0.88rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.res-cal-day-item__pers {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+}
+.res-cal-day-item__estado { font-size: 1rem; }
+
+/* Modal de detalle */
+.res-detalle { text-align: left; }
+.res-detalle__head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border-radius: var(--r-md);
+  margin-bottom: 14px;
+  color: #fff;
+}
+.res-detalle__head--pendiente  { background: linear-gradient(135deg, #fbbf24, var(--warn));  color: #422006; }
+.res-detalle__head--confirmada { background: linear-gradient(135deg, #22c55e, var(--ok)); }
+.res-detalle__head--rechazada  { background: linear-gradient(135deg, #ef4444, var(--error)); }
+.res-detalle__head--cancelada  { background: linear-gradient(135deg, #3b82f6, var(--info)); }
+.res-detalle__head--cumplida   { background: linear-gradient(135deg, #94a3b8, var(--text-muted)); }
+.res-detalle__head--noshow     { background: linear-gradient(135deg, #4b5563, #1f2937); }
+
+.res-detalle__avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+.res-detalle__head-body { min-width: 0; }
+.res-detalle__name {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.1rem;
+  margin: 0 0 2px;
+  color: inherit !important;
+}
+.res-detalle__estado {
+  font-size: 0.82rem;
+  font-weight: 700;
+  opacity: 0.92;
+}
+
+.res-detalle__block {
+  margin-bottom: 16px;
+}
+.res-detalle__block h4 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--primary);
+  margin: 0 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--border);
+  letter-spacing: 0.3px;
+}
+
+.res-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.88rem;
+  color: var(--text-soft);
+  padding: 4px 0;
+  gap: 12px;
+}
+.res-row b {
+  color: var(--primary);
+  font-family: var(--font-display);
+  font-weight: 700;
+  text-align: right;
+}
+
+.res-detalle__obs {
+  margin-top: 6px;
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  color: var(--text-soft);
+  font-style: italic;
+}
+.res-detalle__motivo {
+  margin-top: 6px;
+  background: rgba(220, 38, 38, 0.06);
+  border-left: 3px solid var(--error);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  color: var(--text-soft);
+}
+.res-detalle__motivo b { color: var(--error); }
+
+.res-detalle__cliente-acc {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.res-detalle__cliente-acc .btn {
+  flex: 1;
+  min-width: 120px;
+  text-decoration: none;
+}
+
+.res-detalle__acciones {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1.5px dashed var(--border-strong);
+}
+
+/* Modal aprobar/rechazar — texto en .swal2-popup ya viene tematizado */
+.res-modal-aprobar label,
+.res-modal-aprobar select {
+  margin-top: 8px;
+}
