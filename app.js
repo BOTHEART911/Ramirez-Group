@@ -6791,7 +6791,8 @@ const Reservas = {
     $('#res-retry')?.addEventListener('click', () => this.cargar());
   },
 
-  render() {
+render() {
+    this.renderStats();
     this.renderBannerPendientes();
     this.renderHeroHoy();
     this.actualizarChipsPeriodo();
@@ -6799,6 +6800,33 @@ const Reservas = {
     this.renderPillsEstado();
     if (this.vistaActiva === 'calendario') this.renderCalendario();
     else this.renderLista();
+  },
+
+  // ── Stats bar superior (count + período) ───────────────────
+  renderStats() {
+    const cnt = $('#res-stats-count');
+    if (cnt) {
+      const n = this.reservas.length;
+      cnt.textContent = n + ' reserva' + (n === 1 ? '' : 's');
+    }
+    const per = $('#res-stats-period');
+    if (per) per.textContent = this.etiquetaPeriodo();
+  },
+
+  etiquetaPeriodo() {
+    if (this.periodoActivo === 'hoy')    return 'Hoy';
+    if (this.periodoActivo === 'semana') return 'Esta semana';
+    if (this.periodoActivo === 'mes')    return 'Este mes';
+    if (this.periodoActivo === 'todo')   return 'Todas';
+    if (this.periodoActivo === 'custom') {
+      if (this.desde && this.hasta) {
+        return this.desde === this.hasta
+          ? this.desde
+          : (this.desde + ' → ' + this.hasta);
+      }
+      return 'Personalizado';
+    }
+    return '';
   },
 
 // ── Banner amarillo pulsante ───────────────────────────────
