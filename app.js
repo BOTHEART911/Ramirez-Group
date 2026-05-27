@@ -262,14 +262,14 @@ function updateInstallSection() {
   const installed = isMarkedInstalled() || isStandalone();
   $('#install-android')?.classList.add('hidden');
   $('#install-ios')?.classList.add('hidden');
-  $('#install-other')?.classList.add('hidden');
   if (installed) return;
   if (isIOS()) {
     $('#install-ios')?.classList.remove('hidden');
-  } else if (deferredPrompt) {
-    $('#install-android')?.classList.remove('hidden');
   } else {
-    $('#install-other')?.classList.remove('hidden');
+    // Siempre mostrar los dos botones (Instalar + Continuar) cuando no es iOS.
+    // El handler de btn-install ya maneja el caso sin deferredPrompt mostrando
+    // "Aún no disponible" — igual que supervision.
+    $('#install-android')?.classList.remove('hidden');
   }
 }
 
@@ -336,15 +336,15 @@ async function checkVersion() {
     const serverVersion = String(j.version || '').trim();
     if (!serverVersion) return;
 
-    // Primera lectura: guardar la versión actual y pintarla en todos los spans
+// Primera lectura: guardar la versión actual y pintarla en todos los spans
     if (!APP_VERSION_LOADED) {
       APP_VERSION_LOADED = serverVersion;
       const numEl1 = $('#app-version-number');
       const numEl2 = $('#app-version-number-2');
       const numEl3 = $('#app-version-number-3');
-      if (numEl1) numEl1.textContent = serverVersion;
-      if (numEl2) numEl2.textContent = serverVersion;
-      if (numEl3) numEl3.textContent = serverVersion;
+      if (numEl1) numEl1.textContent = 'Versión ' + serverVersion;
+      if (numEl2) numEl2.textContent = 'Versión ' + serverVersion;
+      if (numEl3) numEl3.textContent = 'Versión ' + serverVersion;
       return;
     }
 
@@ -837,7 +837,7 @@ function setupInstall() {
       updateInstallSection();
     });
   }
-  ['btn-cont-web', 'btn-cont-web-ios', 'btn-cont-other'].forEach(id => {
+['btn-cont-web', 'btn-cont-web-ios'].forEach(id => {
     const b = document.getElementById(id);
     if (b) b.addEventListener('click', iniciarSesion);
   });
