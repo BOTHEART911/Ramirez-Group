@@ -27,7 +27,7 @@ const firebaseConfig = {
 /* ============================================================
    CONSTANTES GENERALES
    ============================================================ */
-const APP_VERSION = '2026.05.26.3'; // se sobreescribe al leer version.json
+const APP_VERSION = '2026.05.26.10'; // se sobreescribe al leer version.json
 const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
@@ -256,6 +256,8 @@ function iniciarSesion() {
       state.user = JSON.parse(saved);
       // Fase 5 / Bloque G — suscribir config también al re-abrir la app
       try { Config.subscribeRTDB(NEGOCIO_RESTAURANTE_ID); } catch (_) {}
+      // Fase 7 / Bloque Q — Listener global de reservas para badge en vivo
+      try { Reservas.engancharRTDB(); } catch (_) {}
       irAInicio();
       return;
     } catch (_) {}
@@ -386,12 +388,17 @@ function procesarLoginExitoso(user) {
   // Fase 5 / Bloque G — Suscribirse al config global vía RTDB.
   // Otros dispositivos reciben los cambios sin esperar el TTL local.
   try { Config.subscribeRTDB(NEGOCIO_RESTAURANTE_ID); } catch (_) {}
+  // Fase 7 / Bloque Q — Listener global de reservas para badge en vivo
+  // (solo se monta si el rol es SUPER o ADMIN; el método valida internamente).
+  try { Reservas.engancharRTDB(); } catch (_) {}
   irAInicio();
 }
 
 function logout() {
   // Fase 5 / Bloque G — Desuscribir listener de config antes de cerrar
   try { Config.unsubscribeRTDB(); } catch (_) {}
+  // Fase 7 / Bloque Q — Desuscribir listener de reservas (badge global)
+  try { Reservas.desengancharRTDB(); } catch (_) {}
   Config.invalidate();
   localStorage.removeItem(SESSION_KEY);
   state.user = null;
@@ -529,11 +536,17 @@ function irAMenuRestaurante() {
       roles: ['SUPERUSUARIO','ADMINISTRADOR','CONTADOR'],
       view: 'anclaje'
     },
-  {
+{
       key: 'balances', titulo: 'Balances', desc: 'Reportes y análisis',
       icono: ICONOS.excel,
       roles: ['SUPERUSUARIO','CONTADOR'],
       view: 'balances'
+    },
+    {
+      key: 'reservas', titulo: 'Reservas', desc: 'Solicitudes de clientes',
+      icono: 'https://res.cloudinary.com/dqqeavica/image/upload/v1779830189/reserva_pto4kr.webp',
+      roles: ['SUPERUSUARIO','ADMINISTRADOR'],
+      view: 'reservas'
     },
     {
       key: 'usuarios', titulo: 'Usuarios', desc: 'Gestionar equipo',
@@ -560,12 +573,13 @@ function irAMenuRestaurante() {
   const grid = $('#restaurante-menu-grid');
   grid.innerHTML = '';
   visibles.forEach(t => {
-    const tile = document.createElement('button');
+  const tile = document.createElement('button');
     tile.className = 'menu-tile';
     tile.innerHTML = `
       <img src="${t.icono}" alt="${t.titulo}" loading="lazy" />
       <div class="menu-tile__title">${t.titulo}</div>
       <div class="menu-tile__desc">${t.desc}</div>
+      ${t.key === 'reservas' ? '<span id="res-tile-badge" class="menu-tile__badge hidden">0</span>' : ''}
     `;
    tile.addEventListener('click', () => {
       playSoundOnce(SOUNDS.click);
@@ -595,6 +609,8 @@ function irAMenuRestaurante() {
         Auditoria.abrir();
       } else if (t.view === 'balances') {
         Balances.abrir();
+      } else if (t.view === 'reservas') {
+        Reservas.abrir();
       } else {
         showView(t.view);
       }
@@ -602,13 +618,21 @@ function irAMenuRestaurante() {
     grid.appendChild(tile);
   });
 
-  if (!visibles.length) {
+if (!visibles.length) {
     grid.innerHTML = `
       <div class="card text-center" style="grid-column: 1 / -1;">
         <h3>Sin permisos</h3>
         <p class="muted">Tu rol no tiene acciones asignadas en este negocio.</p>
       </div>`;
   }
+
+  // Q4 — hidratar el badge del tile Reservas con el último conteo conocido
+  // del listener RTDB global (si ya está montado por SUPER/ADMIN)
+  try {
+    if (typeof Reservas !== 'undefined' && Reservas._ref) {
+      Reservas.actualizarBadgeTile(Reservas._pendientesPrev || 0);
+    }
+  } catch (_) {}
 
   showView('restaurante');
 }
@@ -626,8 +650,9 @@ document.addEventListener('click', (e) => {
     if (typeof Caja    !== 'undefined') Caja.desenganchar();
     if (typeof Anclaje !== 'undefined') Anclaje.desenganchar();
     if (typeof Usuarios !== 'undefined') Usuarios.desenganchar();
-    if (typeof Auditoria !== 'undefined') Auditoria.desenganchar();
+   if (typeof Auditoria !== 'undefined') Auditoria.desenganchar();
     if (typeof Balances !== 'undefined') Balances.desenganchar();
+    if (typeof Reservas !== 'undefined') Reservas.desenganchar();
     if (dest === 'inicio') irAInicio();
     else if (dest === 'restaurante') irAMenuRestaurante();
     else showView(dest);
@@ -6662,12 +6687,957 @@ const Balances = {
       r._bound = true;
       r.addEventListener('click', () => this.cargar());
     }
-    // CSV
+// CSV
     const csv = $('#bal-csv');
     if (csv && !csv._bound) {
       csv._bound = true;
       csv.addEventListener('click', () => this.exportarCSV());
     }
+  }
+};
+
+/* ============================================================
+   ============================================================
+   FASE 7 / BLOQUE Q — VISTA RESERVAS
+   ============================================================
+   Gestión interna de solicitudes de reserva (SUPER + ADMIN).
+   Lista + Calendario, banner pulsante de pendientes, hero del día,
+   chips de período, pills de estado con conteo, cards con quick
+   actions, modal de detalle, notificación RTDB en vivo + badge.
+   ============================================================
+   ============================================================ */
+const Reservas = {
+  // Datos
+  reservas: [],
+  mesas: [],
+  cargando: false,
+
+  // Filtros
+  periodoActivo: 'hoy',
+  desde: '',
+  hasta: '',
+  estadoActivo: 'TODOS',
+  vistaActiva: 'lista',  // 'lista' | 'calendario'
+
+  // Calendario
+  calMes: null,
+  calAnio: null,
+
+  // RTDB
+  _ref: null,
+  _primeraVez: true,
+  _pendientesPrev: 0,
+
+  ESTADO_INFO: {
+    PENDIENTE:         { lbl: 'Pendiente',  icon: '🟡', cls: 'pendiente'  },
+    CONFIRMADA:        { lbl: 'Confirmada', icon: '🟢', cls: 'confirmada' },
+    RECHAZADA:         { lbl: 'Rechazada',  icon: '🔴', cls: 'rechazada'  },
+    CANCELADA_CLIENTE: { lbl: 'Cancelada',  icon: '🔵', cls: 'cancelada'  },
+    CUMPLIDA:          { lbl: 'Cumplida',   icon: '⚪', cls: 'cumplida'   },
+    NO_SHOW:           { lbl: 'No-show',    icon: '⚫', cls: 'noshow'     }
+  },
+
+  async abrir() {
+    showView('reservas');
+    // Default: filtro "hoy" + estado TODOS + vista lista
+    if (!this.desde && !this.hasta) this.aplicarPeriodo('hoy', false);
+    // Cache de mesas (para selector al confirmar/cambiar mesa)
+    if (!this.mesas.length) {
+      try { this.mesas = await apiGet('listMesas'); } catch (e) {}
+    }
+    // Por si la vista se abre antes que el listener global (caso raro)
+    try { this.engancharRTDB(); } catch (_) {}
+    await this.cargar();
+  },
+
+  async cargar() {
+    if (this.cargando) return;
+    this.cargando = true;
+    this.pintarLoading();
+    try {
+      this.reservas = await apiPost('listReservas', withUser({
+        estado: this.estadoActivo,
+        desde:  this.desde,
+        hasta:  this.hasta
+      })) || [];
+      this.render();
+    } catch (e) {
+      this.pintarError(e.message);
+    } finally {
+      this.cargando = false;
+    }
+  },
+
+  pintarLoading() {
+    const cont = $('#res-content');
+    if (cont) cont.innerHTML = `
+      <div class="aud-loading">
+        <div class="spinner">
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <p class="muted">Cargando reservas…</p>
+      </div>`;
+  },
+
+  pintarError(msg) {
+    const cont = $('#res-content');
+    if (cont) cont.innerHTML = `
+      <div class="card text-center">
+        <h3>Error al cargar</h3>
+        <p class="muted">${escapeHtml(msg || '')}</p>
+        <button class="btn btn-ghost mt-md" id="res-retry">Reintentar</button>
+      </div>`;
+    $('#res-retry')?.addEventListener('click', () => this.cargar());
+  },
+
+  render() {
+    this.renderBannerPendientes();
+    this.renderHeroHoy();
+    this.actualizarChipsPeriodo();
+    this.actualizarToggleVista();
+    this.renderPillsEstado();
+    if (this.vistaActiva === 'calendario') this.renderCalendario();
+    else this.renderLista();
+  },
+
+  // ── Banner amarillo pulsante ───────────────────────────────
+  renderBannerPendientes() {
+    const banner = $('#res-banner-pendientes');
+    if (!banner) return;
+    const pend = this.reservas.filter(r => r.estado === 'PENDIENTE').length;
+    if (pend > 0 && this.estadoActivo !== 'PENDIENTE') {
+      banner.classList.remove('hidden');
+      banner.innerHTML = `
+        <span class="res-banner__icon">🔔</span>
+        <div class="res-banner__body">
+          <strong>${pend} solicitud${pend === 1 ? '' : 'es'} nueva${pend === 1 ? '' : 's'}</strong>
+          <span class="res-banner__cta">Toca para revisar →</span>
+        </div>`;
+      banner.onclick = () => {
+        this.estadoActivo = 'PENDIENTE';
+        this.cargar();
+      };
+    } else {
+      banner.classList.add('hidden');
+      banner.onclick = null;
+    }
+  },
+
+  // ── Hero del día ───────────────────────────────────────────
+  renderHeroHoy() {
+    const hero = $('#res-hero-hoy');
+    if (!hero) return;
+    const hoy = this.fechaYyyyMmDdLocal();
+    // Solo mostrar el hero si el filtro de período incluye HOY
+    const inRange =
+      (!this.desde || this.desde <= hoy) &&
+      (!this.hasta || this.hasta >= hoy);
+    if (!inRange) { hero.classList.add('hidden'); return; }
+
+    const reservasHoy = this.reservas.filter(r => r.fechaReserva === hoy);
+    const confirmadas = reservasHoy.filter(r =>
+      r.estado === 'CONFIRMADA' || r.estado === 'CUMPLIDA'
+    );
+    if (!confirmadas.length && !reservasHoy.length) {
+      hero.classList.add('hidden');
+      return;
+    }
+    hero.classList.remove('hidden');
+
+    const totalPersonas = confirmadas.reduce((s, r) => s + (Number(r.personas) || 0), 0);
+    const horasUnicas = Array.from(new Set(confirmadas.map(r => r.horaReserva))).sort();
+    const ahoraHm = this.horaActualHm();
+    const proxima = confirmadas
+      .filter(r => r.horaReserva > ahoraHm)
+      .sort((a, b) => a.horaReserva.localeCompare(b.horaReserva))[0];
+
+    hero.innerHTML = `
+      <div class="res-hero__head">
+        <div class="res-hero__lbl">HOY</div>
+        <h2 class="res-hero__fecha">${escapeHtml(this.fechaLargaHoy())}</h2>
+      </div>
+      <div class="res-hero__stats">
+        <div class="res-hero__stat">
+          <span class="res-hero__stat-num">${confirmadas.length}</span>
+          <span class="res-hero__stat-lbl">confirmadas</span>
+        </div>
+        <div class="res-hero__stat">
+          <span class="res-hero__stat-num">${totalPersonas}</span>
+          <span class="res-hero__stat-lbl">personas</span>
+        </div>
+      </div>
+      ${horasUnicas.length ? `
+        <div class="res-hero__timeline">
+          ${horasUnicas.slice(0, 6).map(h =>
+            `<span class="res-hero__tl-time">${this.formatHora12(h)}</span>`
+          ).join('')}
+        </div>` : ''}
+      ${proxima ? `
+        <div class="res-hero__proxima">
+          ⏰ Próxima: <b>${this.formatHora12(proxima.horaReserva)}</b>
+          · ${escapeHtml(String(proxima.clienteNombre).split(' ')[0])}
+          (${proxima.personas} pers.)
+        </div>` : ''}
+    `;
+  },
+
+  actualizarChipsPeriodo() {
+    $$('[data-res-periodo]').forEach(c => {
+      c.classList.toggle('is-active', c.dataset.resPeriodo === this.periodoActivo);
+    });
+  },
+
+  actualizarToggleVista() {
+    $$('[data-res-vista]').forEach(b => {
+      b.classList.toggle('is-active', b.dataset.resVista === this.vistaActiva);
+    });
+  },
+
+  // ── Pills de estado con conteo ─────────────────────────────
+  renderPillsEstado() {
+    const cont = $('#res-pills-estado');
+    if (!cont) return;
+    // Conteos según el dataset cargado (NO el total absoluto: si el filtro
+    // de período es "hoy", los conteos son de hoy)
+    const conteos = { TODOS: this.reservas.length };
+    Object.keys(this.ESTADO_INFO).forEach(e => conteos[e] = 0);
+    this.reservas.forEach(r => { conteos[r.estado] = (conteos[r.estado] || 0) + 1; });
+
+    const items = [
+      { key: 'TODOS',             lbl: 'Todos' },
+      { key: 'PENDIENTE',         lbl: 'Pendientes' },
+      { key: 'CONFIRMADA',        lbl: 'Confirmadas' },
+      { key: 'RECHAZADA',         lbl: 'Rechazadas' },
+      { key: 'CUMPLIDA',          lbl: 'Cumplidas' },
+      { key: 'NO_SHOW',           lbl: 'No-show' },
+      { key: 'CANCELADA_CLIENTE', lbl: 'Canceladas' }
+    ];
+
+    cont.innerHTML = items.map(it => {
+      const active = this.estadoActivo === it.key;
+      const count = conteos[it.key] || 0;
+      const info = this.ESTADO_INFO[it.key];
+      const cls = active
+        ? `is-active${info ? ' res-pill--' + info.cls : ''}`
+        : '';
+      return `
+        <button class="res-pill ${cls}" data-res-pill="${it.key}">
+          <span class="res-pill__lbl">${it.lbl}</span>
+          ${count > 0 ? `<span class="res-pill__count">${count}</span>` : ''}
+        </button>`;
+    }).join('');
+
+    $$('[data-res-pill]', cont).forEach(b => {
+      b.addEventListener('click', () => {
+        this.estadoActivo = b.dataset.resPill;
+        this.cargar();
+      });
+    });
+  },
+
+  // ── Lista agrupada por día ─────────────────────────────────
+  renderLista() {
+    const cont = $('#res-content');
+    if (!cont) return;
+    if (!this.reservas.length) {
+      cont.innerHTML = `
+        <div class="card text-center" style="margin-top:20px;">
+          <div style="font-size:2.4rem; opacity:0.4;">📋</div>
+          <h3>Sin reservas</h3>
+          <p class="muted">No hay reservas con los filtros actuales.</p>
+        </div>`;
+      return;
+    }
+    const grupos = {};
+    this.reservas.forEach(r => {
+      const d = r.fechaReserva;
+      if (!grupos[d]) grupos[d] = [];
+      grupos[d].push(r);
+    });
+    const dias = Object.keys(grupos).sort();
+
+    cont.innerHTML = dias.map(dia => {
+      const items = grupos[dia].sort((a, b) => a.horaReserva.localeCompare(b.horaReserva));
+      return `
+        <section class="res-dia">
+          <header class="res-dia__head">
+            <span class="res-dia__icon">📌</span>
+            <span class="res-dia__lbl">${escapeHtml(this.etiquetaDia(dia))}</span>
+            <span class="res-dia__count">${items.length}</span>
+          </header>
+          <div class="res-dia__body">
+            ${items.map(r => this.renderCard(r)).join('')}
+          </div>
+        </section>`;
+    }).join('');
+
+    // Tap en card → modal detalle
+    $$('[data-res-card]', cont).forEach(el => {
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('[data-res-quick]')) return;
+        const r = this.reservas.find(x => x.id === el.dataset.resCard);
+        if (r) this.abrirModalDetalle(r);
+      });
+    });
+    // Quick actions
+    $$('[data-res-quick="confirmar"]', cont).forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const r = this.reservas.find(x => x.id === b.dataset.resId);
+        if (r) this.abrirModalAprobar(r);
+      });
+    });
+    $$('[data-res-quick="rechazar"]', cont).forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const r = this.reservas.find(x => x.id === b.dataset.resId);
+        if (r) this.abrirModalRechazar(r);
+      });
+    });
+  },
+
+  renderCard(r) {
+    const info = this.ESTADO_INFO[r.estado] || this.ESTADO_INFO.PENDIENTE;
+    let mesaInfo = '';
+    if (r.estado === 'CONFIRMADA' && r.mesaAsignada) {
+      const m = this.mesas.find(x => x.id === r.mesaAsignada);
+      if (m) mesaInfo = `🪑 Mesa ${m.numero}`;
+    }
+    const quick = (r.estado === 'PENDIENTE') ? `
+      <div class="res-card__quick">
+        <button class="res-card__quick-btn res-card__quick-btn--ok"
+                data-res-quick="confirmar" data-res-id="${r.id}"
+                title="Confirmar">✓</button>
+        <button class="res-card__quick-btn res-card__quick-btn--cancel"
+                data-res-quick="rechazar" data-res-id="${r.id}"
+                title="Rechazar">✕</button>
+      </div>` : '';
+    return `
+      <article class="res-card res-card--${info.cls}" data-res-card="${r.id}">
+        <div class="res-card__hora">${escapeHtml(this.formatHora12(r.horaReserva))}</div>
+        <div class="res-card__body">
+          <div class="res-card__head">
+            <h4 class="res-card__name">${escapeHtml(r.clienteNombre)}</h4>
+            <span class="res-card__personas">${r.personas} pers.</span>
+          </div>
+          ${r.tipoEvento ? `<div class="res-card__tipo">🎉 ${escapeHtml(r.tipoEvento)}</div>` : ''}
+          <div class="res-card__tel">📱 ${escapeHtml(this.fmtTel(r.clienteTelefono))}</div>
+          ${mesaInfo ? `<div class="res-card__mesa">${escapeHtml(mesaInfo)}</div>` : ''}
+        </div>
+        ${quick}
+      </article>`;
+  },
+
+  // ── Calendario mensual ─────────────────────────────────────
+  renderCalendario() {
+    const cont = $('#res-content');
+    if (!cont) return;
+    if (this.calAnio === null || this.calMes === null) {
+      const d = new Date();
+      this.calAnio = d.getFullYear();
+      this.calMes  = d.getMonth();
+    }
+    const primer = new Date(this.calAnio, this.calMes, 1);
+    const ult    = new Date(this.calAnio, this.calMes + 1, 0);
+    const primerDow = primer.getDay();
+    const diasMes   = ult.getDate();
+
+    const yyyyMm = this.calAnio + '-' + String(this.calMes + 1).padStart(2, '0');
+    const porDia = {};
+    this.reservas.forEach(r => {
+      if (String(r.fechaReserva).startsWith(yyyyMm)) {
+        const d = parseInt(r.fechaReserva.substring(8, 10), 10);
+        if (!porDia[d]) porDia[d] = [];
+        porDia[d].push(r);
+      }
+    });
+
+    const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                   'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    const DOW = ['D','L','M','M','J','V','S'];
+    const hoy = this.fechaYyyyMmDdLocal();
+
+    let celdas = '';
+    for (let i = 0; i < primerDow; i++) {
+      celdas += `<div class="res-cal__cell res-cal__cell--empty"></div>`;
+    }
+    for (let d = 1; d <= diasMes; d++) {
+      const fechaCelda = yyyyMm + '-' + String(d).padStart(2, '0');
+      const items = porDia[d] || [];
+      const dots = items.slice(0, 5).map(r => {
+        const info = this.ESTADO_INFO[r.estado];
+        return `<span class="res-cal__dot res-cal__dot--${info ? info.cls : ''}"></span>`;
+      }).join('');
+      const extra = items.length > 5
+        ? `<span class="res-cal__dot-more">+${items.length - 5}</span>` : '';
+      const isHoy = fechaCelda === hoy ? 'is-hoy' : '';
+      const hasCls = items.length ? 'res-cal__cell--has' : '';
+      celdas += `
+        <button class="res-cal__cell ${isHoy} ${hasCls}" data-cal-dia="${fechaCelda}">
+          <div class="res-cal__cell-num">${d}</div>
+          <div class="res-cal__cell-dots">${dots}${extra}</div>
+        </button>`;
+    }
+
+    cont.innerHTML = `
+      <div class="res-cal">
+        <header class="res-cal__head">
+          <button class="res-cal__nav" data-cal-nav="-1" title="Mes anterior">‹</button>
+          <h3 class="res-cal__title">${MESES[this.calMes]} ${this.calAnio}</h3>
+          <button class="res-cal__nav" data-cal-nav="1" title="Mes siguiente">›</button>
+        </header>
+        <div class="res-cal__dow">
+          ${DOW.map(d => `<div class="res-cal__dow-cell">${d}</div>`).join('')}
+        </div>
+        <div class="res-cal__grid">${celdas}</div>
+      </div>`;
+
+    $$('[data-cal-nav]', cont).forEach(b => {
+      b.addEventListener('click', () => {
+        this.calMes += parseInt(b.dataset.calNav, 10);
+        if (this.calMes < 0)  { this.calMes = 11; this.calAnio--; }
+        if (this.calMes > 11) { this.calMes = 0;  this.calAnio++; }
+        const primer = new Date(this.calAnio, this.calMes, 1);
+        const ult    = new Date(this.calAnio, this.calMes + 1, 0);
+        this.desde = this.dateToYmd(primer);
+        this.hasta = this.dateToYmd(ult);
+        this.periodoActivo = 'custom';
+        this.cargar();
+      });
+    });
+    $$('[data-cal-dia]', cont).forEach(b => {
+      b.addEventListener('click', () => this.abrirModalCalendarioDia(b.dataset.calDia));
+    });
+  },
+
+  abrirModalCalendarioDia(fecha) {
+    const items = this.reservas
+      .filter(r => r.fechaReserva === fecha)
+      .sort((a, b) => a.horaReserva.localeCompare(b.horaReserva));
+    if (!items.length) return;
+    const list = items.map(r => {
+      const info = this.ESTADO_INFO[r.estado];
+      return `
+        <button class="res-cal-day-item" data-cal-item="${r.id}">
+          <span class="res-cal-day-item__hora">${this.formatHora12(r.horaReserva)}</span>
+          <span class="res-cal-day-item__name">${escapeHtml(r.clienteNombre)}</span>
+          <span class="res-cal-day-item__pers">${r.personas}p</span>
+          <span class="res-cal-day-item__estado res-cal-day-item__estado--${info ? info.cls : ''}">${info ? info.icon : ''}</span>
+        </button>`;
+    }).join('');
+    const self = this;
+    Swal.fire({
+      title: this.etiquetaDia(fecha),
+      html: `<div class="res-cal-day-list">${list}</div>`,
+      width: 480,
+      showConfirmButton: true,
+      confirmButtonText: 'Cerrar',
+      didOpen: () => {
+        $$('[data-cal-item]').forEach(b => {
+          b.addEventListener('click', () => {
+            const r = self.reservas.find(x => x.id === b.dataset.calItem);
+            Swal.close();
+            setTimeout(() => { if (r) self.abrirModalDetalle(r); }, 120);
+          });
+        });
+      }
+    });
+  },
+
+  // ── Modal de detalle (lectura + acciones según estado) ─────
+  abrirModalDetalle(r) {
+    const info = this.ESTADO_INFO[r.estado] || this.ESTADO_INFO.PENDIENTE;
+    let mesaTxt = '— Sin asignar —';
+    if (r.mesaAsignada) {
+      const m = this.mesas.find(x => x.id === r.mesaAsignada);
+      if (m) mesaTxt = `Mesa ${m.numero}`;
+    }
+    const aproboTxt = r.usuarioAproboNombre
+      ? `${escapeHtml(r.usuarioAproboNombre)} · ${escapeHtml(r.fechaAprobacion || '')}`
+      : '—';
+
+    let accionesHTML = '';
+    if (r.estado === 'PENDIENTE') {
+      accionesHTML = `
+        <button class="btn btn-success btn-block" data-acc="confirmar">✓ Confirmar</button>
+        <button class="btn btn-danger btn-block mt-sm" data-acc="rechazar">✕ Rechazar</button>`;
+    } else if (r.estado === 'CONFIRMADA') {
+      accionesHTML = `
+        <button class="btn btn-success btn-block" data-acc="cumplida">✓ Marcar cumplida</button>
+        <button class="btn btn-ghost btn-block mt-sm" data-acc="cambiarMesa">🪑 Cambiar mesa</button>
+        <button class="btn btn-danger btn-block mt-sm" data-acc="noshow">⚠ Marcar no-show</button>`;
+    }
+
+    const telDigits = String(r.clienteTelefono).replace(/\D/g, '');
+    const html = `
+      <div class="res-detalle">
+        <header class="res-detalle__head res-detalle__head--${info.cls}">
+          <div class="res-detalle__avatar">${escapeHtml(this.iniciales(r.clienteNombre))}</div>
+          <div class="res-detalle__head-body">
+            <h3 class="res-detalle__name">${escapeHtml(r.clienteNombre)}</h3>
+            <div class="res-detalle__estado">${info.icon} ${info.lbl}</div>
+          </div>
+        </header>
+
+        <div class="res-detalle__block">
+          <h4>📋 Información</h4>
+          <div class="res-row"><span>Solicitada</span><b>${escapeHtml(r.fechaSolicitud || '—')}</b></div>
+          <div class="res-row"><span>Fecha reserva</span><b>${escapeHtml(this.fmtFechaLargaCorta(r.fechaReserva, r.horaReserva))}</b></div>
+          <div class="res-row"><span>Personas</span><b>${r.personas}</b></div>
+          ${r.tipoEvento ? `<div class="res-row"><span>Ocasión</span><b>${escapeHtml(r.tipoEvento)}</b></div>` : ''}
+          <div class="res-row"><span>Mesa</span><b>${escapeHtml(mesaTxt)}</b></div>
+          ${r.observaciones ? `<div class="res-detalle__obs">📝 ${escapeHtml(r.observaciones)}</div>` : ''}
+          ${r.motivoRechazo ? `<div class="res-detalle__motivo"><b>Motivo:</b> ${escapeHtml(r.motivoRechazo)}</div>` : ''}
+        </div>
+
+        <div class="res-detalle__block">
+          <h4>👤 Cliente</h4>
+          <div class="res-detalle__cliente-acc">
+            <a href="tel:${escapeHtml(telDigits)}" class="btn btn-ghost btn-sm">📞 ${escapeHtml(this.fmtTel(r.clienteTelefono))}</a>
+            <a href="https://wa.me/57${escapeHtml(telDigits)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">💬 WhatsApp</a>
+          </div>
+        </div>
+
+        <div class="res-detalle__block">
+          <h4>📨 WhatsApps enviados</h4>
+          <div class="res-row"><span>Solicitud al cliente</span><b>${r.enviadoWaCliente ? '✓ Enviado' : '— No enviado'}</b></div>
+          <div class="res-row"><span>Notificación al equipo</span><b>${r.enviadoWaGrupo ? '✓ Enviado' : '— No enviado'}</b></div>
+          <div class="res-row"><span>Confirmación al cliente</span><b>${r.enviadoWaConfirmacion ? '✓ Enviado' : '— No enviado'}</b></div>
+        </div>
+
+        <div class="res-detalle__block">
+          <h4>📜 Histórico</h4>
+          <div class="res-row"><span>Aprobado por</span><b>${aproboTxt}</b></div>
+          <div class="res-row"><span>ID</span><b>${escapeHtml(r.id)}</b></div>
+          <div class="res-row"><span>Token</span><b>${escapeHtml(r.tokenPublico || '')}</b></div>
+        </div>
+
+        ${accionesHTML ? `<div class="res-detalle__acciones">${accionesHTML}</div>` : ''}
+      </div>`;
+
+    const self = this;
+    Swal.fire({
+      html,
+      width: 560,
+      showConfirmButton: false,
+      showCloseButton: true,
+      didOpen: () => {
+        $$('[data-acc]').forEach(b => {
+          b.addEventListener('click', () => {
+            const acc = b.dataset.acc;
+            Swal.close();
+            // Pequeño delay: SweetAlert v11 solo permite un popup; esperamos
+            // que cierre limpio antes de abrir el siguiente modal.
+            setTimeout(() => {
+              if (acc === 'confirmar')        self.abrirModalAprobar(r);
+              else if (acc === 'rechazar')    self.abrirModalRechazar(r);
+              else if (acc === 'cumplida')    self.marcarCumplida(r.id);
+              else if (acc === 'noshow')      self.marcarNoShow(r.id);
+              else if (acc === 'cambiarMesa') self.abrirModalCambiarMesa(r);
+            }, 120);
+          });
+        });
+      }
+    });
+  },
+
+  // ── Acciones (modales mini + APIs) ─────────────────────────
+  async abrirModalAprobar(reserva) {
+    const mesasOptions = this.mesas
+      .slice().sort((a, b) => Number(a.numero) - Number(b.numero))
+      .map(m => `<option value="${m.id}">Mesa ${m.numero} (cap. ${m.capacidad})</option>`)
+      .join('');
+    const result = await Swal.fire({
+      title: 'Confirmar reserva',
+      html: `
+        <div class="res-modal-aprobar">
+          <p style="margin:0 0 4px;"><b>${escapeHtml(reserva.clienteNombre)}</b> · ${reserva.personas} pers.</p>
+          <p class="muted" style="margin:0 0 12px;">${escapeHtml(this.fmtFechaLargaCorta(reserva.fechaReserva, reserva.horaReserva))}</p>
+          <label>Asignar mesa (opcional)</label>
+          <select id="mp-mesa">
+            <option value="">— Sin asignar —</option>
+            ${mesasOptions}
+          </select>
+        </div>`,
+      showCancelButton: true,
+      confirmButtonText: 'Confirmar',
+      cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      focusConfirm: false,
+      preConfirm: () => ({ mesaId: $('#mp-mesa').value || '' })
+    });
+    if (!result.isConfirmed) return;
+    startLoading();
+    try {
+      await apiPost('confirmarReserva', withUser({
+        id: reserva.id,
+        mesaId: result.value.mesaId
+      }));
+      stopLoading();
+      Toast && Toast.fire({ icon: 'success', title: 'Reserva confirmada' });
+      this.cargar();
+    } catch (e) {
+      stopLoading();
+      alertErr('Error al confirmar', e.message);
+    }
+  },
+
+  async abrirModalRechazar(reserva) {
+    const result = await Swal.fire({
+      title: 'Rechazar reserva',
+      html: `
+        <div>
+          <p style="margin:0 0 4px;"><b>${escapeHtml(reserva.clienteNombre)}</b> · ${reserva.personas} pers.</p>
+          <p class="muted" style="margin:0 0 12px;">${escapeHtml(this.fmtFechaLargaCorta(reserva.fechaReserva, reserva.horaReserva))}</p>
+          <label>Motivo del rechazo (obligatorio)</label>
+          <textarea id="mp-motivo" rows="3" placeholder="Ej: aforo completo, día cerrado, evento privado…"></textarea>
+        </div>`,
+      showCancelButton: true,
+      confirmButtonText: 'Rechazar',
+      cancelButtonText: 'Volver',
+      reverseButtons: true,
+      focusConfirm: false,
+      preConfirm: () => {
+        const m = $('#mp-motivo').value.trim();
+        if (m.length < 3) { Swal.showValidationMessage('Motivo requerido (mínimo 3 caracteres)'); return false; }
+        return { motivo: m };
+      }
+    });
+    if (!result.isConfirmed) return;
+    startLoading();
+    try {
+      await apiPost('rechazarReserva', withUser({
+        id: reserva.id,
+        motivo: result.value.motivo
+      }));
+      stopLoading();
+      Toast && Toast.fire({ icon: 'success', title: 'Reserva rechazada' });
+      this.cargar();
+    } catch (e) {
+      stopLoading();
+      alertErr('Error al rechazar', e.message);
+    }
+  },
+
+  async marcarCumplida(id) {
+    const ok = await confirmar('¿Marcar como cumplida?',
+      'Esto indica que el cliente sí asistió a la reserva.', 'Sí, marcar cumplida');
+    if (!ok) return;
+    startLoading();
+    try {
+      await apiPost('marcarCumplidaReserva', withUser({ id }));
+      stopLoading();
+      Toast && Toast.fire({ icon: 'success', title: 'Marcada cumplida' });
+      this.cargar();
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  async marcarNoShow(id) {
+    const ok = await confirmar('¿Marcar como no-show?',
+      'Esto indica que el cliente <b>no asistió</b>. Acción irreversible.', 'Sí, marcar no-show');
+    if (!ok) return;
+    startLoading();
+    try {
+      await apiPost('marcarNoShowReserva', withUser({ id }));
+      stopLoading();
+      Toast && Toast.fire({ icon: 'success', title: 'Marcada como no-show' });
+      this.cargar();
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  async abrirModalCambiarMesa(reserva) {
+    const mesasOptions = this.mesas
+      .slice().sort((a, b) => Number(a.numero) - Number(b.numero))
+      .map(m => `<option value="${m.id}" ${m.id === reserva.mesaAsignada ? 'selected' : ''}>Mesa ${m.numero} (cap. ${m.capacidad})</option>`)
+      .join('');
+    const result = await Swal.fire({
+      title: 'Cambiar mesa',
+      html: `
+        <label>Mesa asignada</label>
+        <select id="mp-mesa2">
+          <option value="">— Quitar asignación —</option>
+          ${mesasOptions}
+        </select>`,
+      showCancelButton: true,
+      confirmButtonText: 'Guardar',
+      cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      preConfirm: () => ({ mesaId: $('#mp-mesa2').value || '' })
+    });
+    if (!result.isConfirmed) return;
+    startLoading();
+    try {
+      await apiPost('cambiarMesaReserva', withUser({
+        id: reserva.id,
+        mesaId: result.value.mesaId
+      }));
+      stopLoading();
+      Toast && Toast.fire({ icon: 'success', title: 'Mesa actualizada' });
+      this.cargar();
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  // ── RTDB: badge global + notificación en vivo ──────────────
+  async engancharRTDB() {
+    if (this._ref) return;
+    if (!rolEs('SUPERUSUARIO', 'ADMINISTRADOR')) return;
+    const fb = await getFirebase();
+    if (!fb) return;
+    this._primeraVez = true;
+    this._pendientesPrev = 0;
+    this._ref = fb.database()
+      .ref('/negocios/' + NEGOCIO_RESTAURANTE_ID + '/reservas/pendientes');
+    this._ref.on('value', (snap) => {
+      const data = snap.val() || {};
+      const count = Object.keys(data).length;
+      // Badge en tile siempre
+      this.actualizarBadgeTile(count);
+      // Sonido solo si AUMENTÓ el conteo y no es el snapshot inicial
+      if (!this._primeraVez && count > this._pendientesPrev) {
+        playSoundOnce(SOUNDS.pedido);
+      }
+      this._pendientesPrev = count;
+      this._primeraVez = false;
+      // Si la vista está abierta, recargar lista para reflejar la nueva
+      const v = $('#view-reservas');
+      if (v && v.classList.contains('active')) this.cargar();
+    }, (err) => console.error('RTDB reservas listener:', err));
+  },
+
+  desengancharRTDB() {
+    if (this._ref) { this._ref.off(); this._ref = null; }
+    this._primeraVez = true;
+    this._pendientesPrev = 0;
+    this.actualizarBadgeTile(0);
+  },
+
+  actualizarBadgeTile(count) {
+    const el = $('#res-tile-badge');
+    if (!el) return;
+    if (count > 0) {
+      el.textContent = count > 99 ? '99+' : count;
+      el.classList.remove('hidden');
+    } else {
+      el.classList.add('hidden');
+    }
+  },
+
+  // ── Período ────────────────────────────────────────────────
+  aplicarPeriodo(periodo, recargar) {
+    this.periodoActivo = periodo;
+    const hoy = this.fechaYyyyMmDdLocal();
+    switch (periodo) {
+      case 'hoy':
+        this.desde = hoy; this.hasta = hoy; break;
+      case 'semana': {
+        const d = new Date();
+        const dow = d.getDay() || 7;
+        const lun = new Date(d); lun.setDate(d.getDate() - (dow - 1));
+        const dom = new Date(lun); dom.setDate(lun.getDate() + 6);
+        this.desde = this.dateToYmd(lun);
+        this.hasta = this.dateToYmd(dom);
+        break;
+      }
+      case 'mes': {
+        const d = new Date();
+        const primer = new Date(d.getFullYear(), d.getMonth(), 1);
+        const ult    = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+        this.desde = this.dateToYmd(primer);
+        this.hasta = this.dateToYmd(ult);
+        break;
+      }
+      case 'todo':
+        this.desde = ''; this.hasta = ''; break;
+    }
+    if (recargar) this.cargar();
+  },
+
+  abrirPickerCustom() {
+    Swal.fire({
+      title: 'Período personalizado',
+      html: `
+        <label>Desde</label>
+        <input id="res-desde" type="date" value="${this.desde || ''}" />
+        <label>Hasta</label>
+        <input id="res-hasta" type="date" value="${this.hasta || ''}" />`,
+      showCancelButton: true,
+      confirmButtonText: 'Aplicar',
+      cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      preConfirm: () => {
+        const d = $('#res-desde').value;
+        const h = $('#res-hasta').value;
+        if (!d || !h) { Swal.showValidationMessage('Llena ambas fechas'); return false; }
+        if (d > h) { Swal.showValidationMessage('Desde no puede ser mayor que hasta'); return false; }
+        return { d, h };
+      }
+    }).then(r => {
+      if (!r.isConfirmed) {
+        // Re-marcar el chip activo previo
+        this.actualizarChipsPeriodo();
+        return;
+      }
+      this.periodoActivo = 'custom';
+      this.desde = r.value.d;
+      this.hasta = r.value.h;
+      this.cargar();
+    });
+  },
+
+  // ── Vista lista vs calendario ──────────────────────────────
+  cambiarVista(vista) {
+    this.vistaActiva = vista;
+    if (vista === 'calendario') {
+      const d = new Date();
+      this.calAnio = d.getFullYear();
+      this.calMes  = d.getMonth();
+      const primer = new Date(this.calAnio, this.calMes, 1);
+      const ult    = new Date(this.calAnio, this.calMes + 1, 0);
+      this.desde = this.dateToYmd(primer);
+      this.hasta = this.dateToYmd(ult);
+      this.periodoActivo = 'custom';
+      this.cargar();
+    } else {
+      this.render();
+    }
+  },
+
+  // ── CSV ────────────────────────────────────────────────────
+  exportarCSV() {
+    if (!this.reservas.length) {
+      Toast && Toast.fire({ icon: 'info', title: 'No hay reservas para exportar' });
+      return;
+    }
+    const headers = ['ID','FECHA_SOLICITUD','FECHA_RESERVA','HORA_RESERVA',
+                     'CLIENTE_NOMBRE','CLIENTE_TELEFONO','PERSONAS','TIPO_EVENTO',
+                     'OBSERVACIONES','ESTADO','MOTIVO_RECHAZO','MESA_ASIGNADA',
+                     'USUARIO_APROBO','FECHA_APROBACION','TOKEN_PUBLICO'];
+    const escapar = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    const lines = [headers.join(',')];
+    this.reservas.forEach(r => {
+      lines.push([
+        r.id, r.fechaSolicitud, r.fechaReserva, r.horaReserva,
+        r.clienteNombre, r.clienteTelefono, r.personas, r.tipoEvento,
+        r.observaciones, r.estado, r.motivoRechazo,
+        r.mesaAsignada, r.usuarioAproboNombre, r.fechaAprobacion, r.tokenPublico
+      ].map(escapar).join(','));
+    });
+    const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'reservas_' + this.fechaYyyyMmDdLocal().replace(/-/g, '') + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    Toast && Toast.fire({ icon: 'success', title: 'CSV descargado' });
+  },
+
+  // ── Helpers ────────────────────────────────────────────────
+  fechaYyyyMmDdLocal(d) {
+    d = d || new Date();
+    return d.getFullYear() + '-' +
+           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+           String(d.getDate()).padStart(2, '0');
+  },
+  dateToYmd(d) { return this.fechaYyyyMmDdLocal(d); },
+  horaActualHm() {
+    const d = new Date();
+    return String(d.getHours()).padStart(2, '0') + ':' +
+           String(d.getMinutes()).padStart(2, '0');
+  },
+  fechaLargaHoy() {
+    let s = new Date().toLocaleDateString('es-CO', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+    });
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  },
+  etiquetaDia(ymd) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return ymd;
+    const hoy = this.fechaYyyyMmDdLocal();
+    const ayer = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return this.dateToYmd(d); })();
+    const manana = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return this.dateToYmd(d); })();
+    const [y, m, d] = ymd.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    let s = dt.toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' });
+    s = s.charAt(0).toUpperCase() + s.slice(1);
+    if (ymd === hoy)    return 'HOY · ' + s;
+    if (ymd === ayer)   return 'AYER · ' + s;
+    if (ymd === manana) return 'MAÑANA · ' + s;
+    return s;
+  },
+  fmtFechaLargaCorta(ymd, hm) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd || '')) return '—';
+    const [y, m, d] = ymd.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    const DIAS = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+    const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                   'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    let s = DIAS[dt.getDay()] + ', ' + d + ' de ' + MESES[m - 1] + ' de ' + y;
+    if (hm && /^\d{2}:\d{2}$/.test(hm)) s += ' ' + this.formatHora12(hm);
+    return s;
+  },
+  formatHora12(hm) {
+    if (!/^\d{2}:\d{2}$/.test(hm || '')) return hm || '';
+    const [h, m] = hm.split(':').map(Number);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h === 0 ? 12 : (h > 12 ? h - 12 : h);
+    return h12 + ':' + String(m).padStart(2, '0') + ' ' + ampm;
+  },
+  iniciales(nombre) {
+    const p = String(nombre || '?').trim().split(/\s+/);
+    if (!p.length || !p[0]) return '?';
+    if (p.length === 1) return p[0].charAt(0).toUpperCase();
+    return (p[0].charAt(0) + p[1].charAt(0)).toUpperCase();
+  },
+  fmtTel(t) {
+    const s = String(t || '').replace(/\D/g, '');
+    if (s.length !== 10) return s;
+    return s.slice(0, 3) + ' ' + s.slice(3, 6) + ' ' + s.slice(6);
+  },
+
+  // ── Lifecycle ──────────────────────────────────────────────
+  // El listener RTDB NO se desengancha al cambiar de vista — vive
+  // mientras el SUPER/ADMIN esté logueado para mantener el badge.
+  // Solo se desengancha en logout (manejado en logout()).
+  desenganchar() { /* no-op intencional */ },
+
+  setupListeners() {
+    const btnRefresh = $('#res-refresh');
+    if (btnRefresh && !btnRefresh._bound) {
+      btnRefresh._bound = true;
+      btnRefresh.addEventListener('click', () => this.cargar());
+    }
+    const btnCSV = $('#res-csv');
+    if (btnCSV && !btnCSV._bound) {
+      btnCSV._bound = true;
+      btnCSV.addEventListener('click', () => this.exportarCSV());
+    }
+    $$('[data-res-periodo]').forEach(c => {
+      if (c._bound) return;
+      c._bound = true;
+      c.addEventListener('click', () => {
+        const p = c.dataset.resPeriodo;
+        if (p === 'custom') return this.abrirPickerCustom();
+        this.aplicarPeriodo(p, true);
+      });
+    });
+    $$('[data-res-vista]').forEach(b => {
+      if (b._bound) return;
+      b._bound = true;
+      b.addEventListener('click', () => this.cambiarVista(b.dataset.resVista));
+    });
   }
 };
 
@@ -6697,4 +7667,6 @@ window.addEventListener('DOMContentLoaded', () => {
 // Fase 6
   Auditoria.setupListeners();
   Balances.setupListeners();
+// Fase 7
+  Reservas.setupListeners();
 });
