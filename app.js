@@ -206,6 +206,12 @@ function confirmar(title, html = '', confirmText = 'Sí, continuar') {
    ============================================================ */
 let deferredPrompt = null;
 
+function isStandalone() {
+  const dmStandalone = window.matchMedia('(display-mode: standalone)').matches;
+  const dmInstalled  = window.matchMedia('(display-mode: installed)').matches;
+  const iosStandalone = (window.navigator.standalone === true);
+  return dmStandalone || dmInstalled || iosStandalone;
+}
 function isIOS() {
   return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
 }
