@@ -6801,27 +6801,40 @@ const Reservas = {
     else this.renderLista();
   },
 
-  // ── Banner amarillo pulsante ───────────────────────────────
+// ── Banner amarillo pulsante ───────────────────────────────
   renderBannerPendientes() {
     const banner = $('#res-banner-pendientes');
     if (!banner) return;
-    const pend = this.reservas.filter(r => r.estado === 'PENDIENTE').length;
-    if (pend > 0 && this.estadoActivo !== 'PENDIENTE') {
-      banner.classList.remove('hidden');
-      banner.innerHTML = `
-        <span class="res-banner__icon">🔔</span>
-        <div class="res-banner__body">
-          <strong>${pend} solicitud${pend === 1 ? '' : 'es'} nueva${pend === 1 ? '' : 's'}</strong>
-          <span class="res-banner__cta">Toca para revisar →</span>
-        </div>`;
-      banner.onclick = () => {
-        this.estadoActivo = 'PENDIENTE';
-        this.cargar();
-      };
-    } else {
+    // Conteo del dataset filtrado (período actual)
+    const pendFiltro = this.reservas.filter(r => r.estado === 'PENDIENTE').length;
+    // Conteo GLOBAL (todas las fechas) desde listener RTDB
+    const pendGlobal = this._pendientesPrev || 0;
+    // Usamos el máximo: si el listener aún no respondió, caemos al dataset
+    const pend = Math.max(pendFiltro, pendGlobal);
+
+    if (pend === 0 || this.estadoActivo === 'PENDIENTE') {
       banner.classList.add('hidden');
       banner.onclick = null;
+      return;
     }
+    banner.classList.remove('hidden');
+    // Si el global supera al filtro, indicar que hay pendientes fuera del rango
+    const fueraDeRango = pendGlobal > pendFiltro;
+    banner.innerHTML = `
+      <span class="res-banner__icon">🔔</span>
+      <div class="res-banner__body">
+        <strong>${pend} solicitud${pend === 1 ? '' : 'es'} pendiente${pend === 1 ? '' : 's'}</strong>
+        <span class="res-banner__cta">${fueraDeRango ? 'Toca para ver todas →' : 'Toca para revisar →'}</span>
+      </div>`;
+    banner.onclick = () => {
+      // Si hay pendientes fuera del filtro de período actual, ampliar a "Todo"
+      // para que se vean todas. Si todas están en el filtro actual, mantener.
+      if (pendGlobal > pendFiltro) {
+        this.aplicarPeriodo('todo', false);
+      }
+      this.estadoActivo = 'PENDIENTE';
+      this.cargar();
+    };
   },
 
   // ── Hero del día ───────────────────────────────────────────
@@ -7387,31 +7400,54 @@ const Reservas = {
     }
   },
 
-  // ── RTDB: badge global + notificación en vivo ──────────────
+// ── RTDB: badge global + notificación en vivo ──────────────
   async engancharRTDB() {
     if (this._ref) return;
     if (!rolEs('SUPERUSUARIO', 'ADMINISTRADOR')) return;
-    const fb = await getFirebase();
-    if (!fb) return;
-    this._primeraVez = true;
-    this._pendientesPrev = 0;
-    this._ref = fb.database()
-      .ref('/negocios/' + NEGOCIO_RESTAURANTE_ID + '/reservas/pendientes');
-    this._ref.on('value', (snap) => {
-      const data = snap.val() || {};
-      const count = Object.keys(data).length;
-      // Badge en tile siempre
-      this.actualizarBadgeTile(count);
-      // Sonido solo si AUMENTÓ el conteo y no es el snapshot inicial
-      if (!this._primeraVez && count > this._pendientesPrev) {
-        playSoundOnce(SOUNDS.pedido);
+    try {
+      // Esperar a que el SDK de Firebase termine de cargar (CDN async).
+      // El listener se monta tras login pero Firebase puede tardar 100-2000ms
+      // dependiendo de conexión. Reintentamos cada 200ms hasta 6s.
+      let intentos = 0;
+      while (typeof firebase === 'undefined' && intentos < 30) {
+        await new Promise(r => setTimeout(r, 200));
+        intentos++;
       }
-      this._pendientesPrev = count;
-      this._primeraVez = false;
-      // Si la vista está abierta, recargar lista para reflejar la nueva
-      const v = $('#view-reservas');
-      if (v && v.classList.contains('active')) this.cargar();
-    }, (err) => console.error('RTDB reservas listener:', err));
+      if (typeof firebase === 'undefined') {
+        console.warn('Reservas: SDK Firebase no disponible, listener no montado');
+        return;
+      }
+      const fb = await getFirebase();
+      if (!fb) return;
+      this._primeraVez = true;
+      this._pendientesPrev = 0;
+      this._ref = fb.database()
+        .ref('/negocios/' + NEGOCIO_RESTAURANTE_ID + '/reservas/pendientes');
+      this._ref.on('value', (snap) => {
+        const data = snap.val() || {};
+        const count = Object.keys(data).length;
+        // Badge en tile siempre
+        this.actualizarBadgeTile(count);
+        // Sonido solo si AUMENTÓ el conteo y no es el snapshot inicial
+        if (!this._primeraVez && count > this._pendientesPrev) {
+          playSoundOnce(SOUNDS.pedido);
+        }
+        this._pendientesPrev = count;
+        this._primeraVez = false;
+        // Si la vista está abierta, recargar lista (también refresca banner)
+        const v = $('#view-reservas');
+        if (v && v.classList.contains('active')) {
+          this.cargar();
+        } else {
+          // Si la vista NO está abierta pero hay un badge, ya quedó actualizado.
+          // Si la vista SÍ está activa pero apenas se montó el listener (race),
+          // refrescamos al menos el banner sin recargar la lista entera.
+          this.renderBannerPendientes && this.renderBannerPendientes();
+        }
+      }, (err) => console.error('RTDB reservas listener:', err));
+    } catch (e) {
+      console.error('Reservas.engancharRTDB:', e);
+    }
   },
 
   desengancharRTDB() {
