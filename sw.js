@@ -34,8 +34,8 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url);
 
-  // version.json SIEMPRE desde la red, nunca caché
-  if (url.pathname.endsWith('/version.json')) {
+// version.js SIEMPRE desde la red, nunca caché
+  if (url.pathname.endsWith('/version.js')) {
     event.respondWith(fetch(req, { cache: 'no-store' }).catch(() => new Response('{}', { headers: { 'Content-Type': 'application/json' } })));
     return;
   }
