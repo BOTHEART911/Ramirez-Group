@@ -27,7 +27,7 @@ const firebaseConfig = {
 /* ============================================================
    CONSTANTES GENERALES
    ============================================================ */
-const APP_VERSION = '2026.05.26.10'; // se sobreescribe al leer version.json
+let APP_VERSION_LOADED = ''; // se llena al leer version.js (lógica /supervision/)
 const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
@@ -205,46 +205,81 @@ function confirmar(title, html = '', confirmText = 'Sí, continuar') {
    PWA — INSTALL + SERVICE WORKER + AUTO-UPDATE
    ============================================================ */
 let deferredPrompt = null;
-const isStandalone = () =>
-  window.matchMedia('(display-mode: standalone)').matches ||
-  window.navigator.standalone === true;
-const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+}
+function isMarkedInstalled() {
+  try { return localStorage.getItem('pwaInstalledFlag') === '1'; } catch(_) { return false; }
+}
+function markInstalled() {
+  try { localStorage.setItem('pwaInstalledFlag', '1'); } catch(_) {}
+}
+function clearInstalledMark() {
+  try { localStorage.removeItem('pwaInstalledFlag'); } catch(_) {}
+}
+async function detectInstalled() {
+  if (isStandalone()) return true;
+  if (typeof navigator.getInstalledRelatedApps === 'function') {
+    try {
+      const apps = await navigator.getInstalledRelatedApps();
+      const found = apps.some(a =>
+        a.platform === 'webapp' &&
+        typeof a.url === 'string' &&
+        /manifest\.webmanifest$/.test(a.url)
+      );
+      if (found) { markInstalled(); return true; }
+      else { clearInstalledMark(); }
+    } catch(_) {}
+  }
+  return isMarkedInstalled();
+}
+
+/* Actualiza qué contenedor de instalación se muestra según el estado real.
+   Solo muestra #install-android cuando deferredPrompt ya está disponible.
+   Esto elimina el bug "Aún no disponible". */
+function updateInstallSection() {
+  const installed = isMarkedInstalled() || isStandalone();
+  $('#install-android')?.classList.add('hidden');
+  $('#install-ios')?.classList.add('hidden');
+  $('#install-other')?.classList.add('hidden');
+  if (installed) return;
+  if (isIOS()) {
+    $('#install-ios')?.classList.remove('hidden');
+  } else if (deferredPrompt) {
+    $('#install-android')?.classList.remove('hidden');
+  } else {
+    $('#install-other')?.classList.remove('hidden');
+  }
+}
 
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
+  // Si estamos en la vista de instalar, refrescar para mostrar el botón
+  const v = document.getElementById('view-instalar');
+  if (v && v.classList.contains('active')) updateInstallSection();
+});
+
+window.addEventListener('appinstalled', () => {
+  markInstalled();
+  deferredPrompt = null;
+  updateInstallSection();
 });
 
 async function setupPWA() {
   // Service worker
   if ('serviceWorker' in navigator) {
-    try {
-      await navigator.serviceWorker.register('./sw.js');
-    } catch (e) {
-      console.warn('SW no registrado:', e);
-    }
+    try { await navigator.serviceWorker.register('./sw.js'); }
+    catch (e) { console.warn('SW no registrado:', e); }
   }
-
-  // Decidir vista inicial
-  if (!isStandalone()) {
-    // Mostrar instalación
-    showView('instalar');
-    if (isIOS()) {
-      $('#install-ios').classList.remove('hidden');
-    } else if (deferredPrompt || 'BeforeInstallPromptEvent' in window) {
-      $('#install-android').classList.remove('hidden');
-    } else {
-      // Esperar un momento por si llega beforeinstallprompt
-      setTimeout(() => {
-        if (deferredPrompt) {
-          $('#install-android').classList.remove('hidden');
-        } else {
-          $('#install-other').classList.remove('hidden');
-        }
-      }, 700);
-    }
-  } else {
+  // Detectar si ya está instalada (incluye flag persistente)
+  const installed = await detectInstalled();
+  if (installed) {
     iniciarSesion();
+  } else {
+    showView('instalar');
+    updateInstallSection();
   }
 }
 
@@ -265,33 +300,73 @@ function iniciarSesion() {
   showView('login');
 }
 
-/* Auto-update: revisa version.json cada 5 min */
+/* Auto-update — lógica portada de /supervision/.
+   No usa constante hardcoded: la primera versión leída del archivo se
+   guarda en APP_VERSION_LOADED y las siguientes lecturas se comparan
+   contra ella. Si cambia, limpia caches y recarga. */
+let __versionCheckInFlight = false;
+
 async function checkVersion() {
+  if (__versionCheckInFlight) return;
+  __versionCheckInFlight = true;
   try {
     const r = await fetch('./version.js?t=' + Date.now(), { cache: 'no-store' });
     if (!r.ok) return;
     const j = await r.json();
-    if (j.version && j.version !== APP_VERSION) {
-      console.log('Nueva versión disponible:', j.version);
-      // Recargar limpiando cache
-      if ('serviceWorker' in navigator) {
-        const regs = await navigator.serviceWorker.getRegistrations();
-        for (const reg of regs) await reg.unregister();
-      }
-      if ('caches' in window) {
+    const serverVersion = String(j.version || '').trim();
+    if (!serverVersion) return;
+
+    // Primera lectura: guardar la versión actual y pintarla en todos los spans
+    if (!APP_VERSION_LOADED) {
+      APP_VERSION_LOADED = serverVersion;
+      const numEl1 = $('#app-version-number');
+      const numEl2 = $('#app-version-number-2');
+      const numEl3 = $('#app-version-number-3');
+      if (numEl1) numEl1.textContent = serverVersion;
+      if (numEl2) numEl2.textContent = serverVersion;
+      if (numEl3) numEl3.textContent = serverVersion;
+      return;
+    }
+
+    // Lecturas posteriores: si cambió, recargar silenciosamente
+    if (serverVersion !== APP_VERSION_LOADED) {
+      console.log('Nueva versión disponible:', serverVersion);
+      try {
         const keys = await caches.keys();
         await Promise.all(keys.map(k => caches.delete(k)));
-      }
+      } catch(_) {}
       window.location.reload();
     }
-    const numEl1 = $('#app-version-number');
-    const numEl2 = $('#app-version-number-2');
-    const numEl3 = $('#app-version-number-3');
-    if (numEl1) numEl1.textContent = APP_VERSION;
-    if (numEl2) numEl2.textContent = APP_VERSION;
-    if (numEl3) numEl3.textContent = APP_VERSION;
-  } catch (e) { /* silencioso */ }
+  } catch (_) {
+    /* sin red: silencio */
+  } finally {
+    __versionCheckInFlight = false;
+  }
 }
+
+/* Recarga automática cuando el SW nuevo toma control (con anti-loop) */
+if ('serviceWorker' in navigator) {
+  let __reloadingFromSW = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (__reloadingFromSW) return;
+    const lastReload = Number(sessionStorage.getItem('__swReloadTs') || 0);
+    const now = Date.now();
+    if (now - lastReload < 10000) return;
+    __reloadingFromSW = true;
+    sessionStorage.setItem('__swReloadTs', String(now));
+    location.reload();
+  });
+}
+
+/* Chequeo extra cuando la pestaña vuelve a estar visible (máx 1 vez / 30s) */
+let __lastVersionCheck = Date.now();
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  const now = Date.now();
+  if (now - __lastVersionCheck < 30000) return;
+  __lastVersionCheck = now;
+  checkVersion();
+});
 
 /* ============================================================
    LOGIN — PIN y Documento
@@ -715,16 +790,31 @@ function setupInstall() {
   const btnInstall = $('#btn-install');
   if (btnInstall) {
     btnInstall.addEventListener('click', async () => {
+      // Defensa: si por alguna razón llega un iOS hasta este botón
+      if (isIOS()) {
+        return alertInfo('Instala desde Safari',
+          'Toca el botón Compartir de Safari y luego "Añadir a pantalla de inicio".');
+      }
       if (!deferredPrompt) {
         return alertInfo('Aún no disponible',
           'El instalador no está listo. Espera unos segundos e intenta de nuevo.');
       }
-      deferredPrompt.prompt();
-      const choice = await deferredPrompt.userChoice;
+      const dp = deferredPrompt;
+      dp.prompt();
+      const choice = await dp.userChoice;
       deferredPrompt = null;
       if (choice.outcome === 'accepted') {
-        setTimeout(() => window.location.reload(), 800);
+        markInstalled();
+        Swal.fire({
+          icon: 'success',
+          title: '¡App instalándose!',
+          html: 'Espera unos segundos mientras el sistema instala la App. ' +
+                'Al desaparecer este aviso, la App aparecerá en la pantalla principal de este dispositivo.',
+          timer: 8000,
+          showConfirmButton: false
+        });
       }
+      updateInstallSection();
     });
   }
   ['btn-cont-web', 'btn-cont-web-ios', 'btn-cont-other'].forEach(id => {
