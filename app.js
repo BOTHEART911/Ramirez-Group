@@ -266,19 +266,19 @@ function updateInstallSection() {
   if (isIOS()) {
     $('#install-ios')?.classList.remove('hidden');
   } else {
-    // Siempre mostrar los dos botones (Instalar + Continuar) cuando no es iOS.
-    // El handler de btn-install ya maneja el caso sin deferredPrompt mostrando
-    // "Aún no disponible" — igual que supervision.
+    // Bloque visible siempre (para mostrar "Continuar en el navegador").
+    // El botón "Instalar" solo aparece si Chrome ya disparó beforeinstallprompt
+    // (idéntico a supervision: btn-instalar oculto hasta que el navegador lo permita).
     $('#install-android')?.classList.remove('hidden');
+    const btn = $('#btn-install');
+    if (btn) btn.style.display = (deferredPrompt || isIOS()) ? '' : 'none';
   }
 }
 
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
-  // Si estamos en la vista de instalar, refrescar para mostrar el botón
-  const v = document.getElementById('view-instalar');
-  if (v && v.classList.contains('active')) updateInstallSection();
+  updateInstallSection();
 });
 
 window.addEventListener('appinstalled', () => {
@@ -810,14 +810,30 @@ function setupInstall() {
   const btnInstall = $('#btn-install');
   if (btnInstall) {
     btnInstall.addEventListener('click', async () => {
-      // Defensa: si por alguna razón llega un iOS hasta este botón
+      // Flujo iOS: instrucciones con GIF (idéntico a supervision)
       if (isIOS()) {
-        return alertInfo('Instala desde Safari',
-          'Toca el botón Compartir de Safari y luego "Añadir a pantalla de inicio".');
+        Swal.fire({
+          icon: 'info',
+          title: '¡Para Instalar en tu Iphone!',
+          html: `
+            <div style="text-align:center; margin-top:8px;">
+              <img
+                src="https://res.cloudinary.com/dqqeavica/image/upload/v1765745210/instalacion_ios_ysbhnd.gif"
+                alt="Instalación de IOS"
+                style="width:180px; max-width:70vw; height:auto; display:block; margin:0 auto 12px;"
+              >
+              <div style="margin-top:10px;">
+                <b>1.</b> Toca Compartir.<br><b>2.</b> Elige "Agregar a pantalla de inicio".<br><b>3.</b> Confirma "Agregar".
+              </div>
+            </div>
+          `
+        });
+        return;
       }
+      // Android: requiere beforeinstallprompt
       if (!deferredPrompt) {
-        return alertInfo('Aún no disponible',
-          'El instalador no está listo. Espera unos segundos e intenta de nuevo.');
+        Swal.fire({ icon: 'info', title: 'Instalación no disponible todavía' });
+        return;
       }
       const dp = deferredPrompt;
       dp.prompt();
@@ -828,16 +844,29 @@ function setupInstall() {
         Swal.fire({
           icon: 'success',
           title: '¡App instalándose!',
-          html: 'Espera unos segundos mientras el sistema instala la App. ' +
-                'Al desaparecer este aviso, la App aparecerá en la pantalla principal de este dispositivo.',
-          timer: 8000,
+          html: `
+            <div style="text-align:center; margin-top:8px;">
+              <img
+                src="https://res.cloudinary.com/dqqeavica/image/upload/v1765740540/instalacion_lydtcl.gif"
+                alt="Instalando app"
+                style="width:180px; max-width:70vw; height:auto; display:block; margin:0 auto 12px;"
+              >
+              <div>Debes esperar unos segundos mientras el sistema instala la App.</div>
+              <div style="margin-top:10px;">
+                <b>Al desaparecer este aviso, puedes salir de esta vista. La App aparecerá en la pantalla principal de este dispositivo.</b>
+              </div>
+            </div>
+          `,
+          timer: 12000,
           showConfirmButton: false
         });
+      } else {
+        Swal.fire({ icon: 'info', title: 'Instalación cancelada' });
       }
       updateInstallSection();
     });
   }
-['btn-cont-web', 'btn-cont-web-ios'].forEach(id => {
+   ['btn-cont-web', 'btn-cont-web-ios'].forEach(id => {
     const b = document.getElementById(id);
     if (b) b.addEventListener('click', iniciarSesion);
   });
