@@ -3113,14 +3113,15 @@ async cargarInicial() {
 
     let acciones = '';
     if (estado === 'PENDIENTE') {
-      acciones = `<button class="cmd-btn cmd-btn--start" data-cmd-start="${it.id}">Empezar</button>`;
+      acciones = `<button class="cmd-btn cmd-btn--ready" data-cmd-ready="${it.id}" title="Marcar listo directo">Listo</button>` +
+                 `<button class="cmd-btn cmd-btn--start" data-cmd-start="${it.id}">Empezar</button>`;
     } else if (estado === 'PREPARANDO') {
       acciones = `
         <button class="cmd-btn cmd-btn--back"  data-cmd-back="${it.id}" title="Devolver a pendientes">↶</button>
         <button class="cmd-btn cmd-btn--ready" data-cmd-ready="${it.id}">Marcar listo</button>
       `;
     } else {
-      acciones = `<button class="cmd-btn cmd-btn--back" data-cmd-back="${it.id}" title="Volver a cocina">↶ Volver</button>`;
+      acciones = `<button class="cmd-btn cmd-btn--back" data-cmd-start="${it.id}" title="Volver a cocina">↶ Volver</button>`;
     }
 
     return `
