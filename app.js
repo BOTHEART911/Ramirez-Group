@@ -127,7 +127,10 @@ function showView(viewId) {
 
 function rolEs(...roles) {
   const r = String(state.user?.rol || '').toUpperCase();
-  return roles.map(x => String(x).toUpperCase()).indexOf(r) >= 0;
+  const lista = roles.map(x => String(x).toUpperCase());
+  // El DESARROLLADOR hereda todos los permisos del SUPERUSUARIO
+  if (r === 'DESARROLLADOR' && lista.indexOf('SUPERUSUARIO') >= 0) return true;
+  return lista.indexOf(r) >= 0;
 }
 
 /* ============================================================
