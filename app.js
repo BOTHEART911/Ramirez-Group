@@ -2207,19 +2207,18 @@ abrirPedidoExistente(pedidoId, mesaId) {
         b.addEventListener('click', () => this.marcarServido(b.dataset.itemServir));
       });
       // Fase 4D — tap sobre el nombre del ítem (sólo si editable) abre el modal de edición
-      $$('[data-item-edit]', cont).forEach(b => {
+ $$('[data-item-edit]', cont).forEach(b => {
         b.addEventListener('click', () => this.editarItem(b.dataset.itemEdit));
       });
     }
 
-     // Botón "Liberar mesa": SOLO visible si el pedido existe y no tiene
-    // NINGÚN producto (ni ingresado ni servido). Permite cerrar una mesa
-    // abierta por error sin dejar fila fantasma en PEDIDOS.
+    // ▼▼ NUEVO: mostrar/ocultar botón "Liberar mesa"
     const btnCerrar = $('#pd-btn-cerrar-mesa');
     if (btnCerrar) {
       const sinProductos = itemsArr.length === 0;
       btnCerrar.classList.toggle('hidden', !(sinProductos && !!p.id));
     }
+    // ▲▲ FIN NUEVO
 
     $('#pd-subtotal').textContent = fmtPesos(meta.subtotal || 0);
     $('#pd-total').textContent = fmtPesos(meta.total || 0);
@@ -2912,11 +2911,19 @@ if (sInp && !sInp._bound) {
       });
       sInp._bound = true;
     }
-    const btnC = $('#pd-btn-cuenta');
+const btnC = $('#pd-btn-cuenta');
     if (btnC && !btnC._bound) {
       btnC.addEventListener('click', () => this.pedirCuenta());
       btnC._bound = true;
     }
+
+    // ▼▼ NUEVO
+    const btnCerrar = $('#pd-btn-cerrar-mesa');
+    if (btnCerrar && !btnCerrar._bound) {
+      btnCerrar.addEventListener('click', () => this.cerrarMesa());
+      btnCerrar._bound = true;
+    }
+    // ▲▲ FIN NUEVO
   },
 
   async pedirCuenta() {
