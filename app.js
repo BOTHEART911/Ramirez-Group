@@ -818,7 +818,7 @@ function setupInstall() {
           html: `
             <div style="text-align:center; margin-top:8px;">
               <img
-                src="https://res.cloudinary.com/dqqeavica/image/upload/v1765745210/instalacion_ios_ysbhnd.gif"
+                src="https://res.cloudinary.com/dqqeavica/image/upload/v1780053848/heartsync_ojmqxm.gif"
                 alt="Instalación de IOS"
                 style="width:180px; max-width:70vw; height:auto; display:block; margin:0 auto 12px;"
               >
@@ -847,7 +847,7 @@ function setupInstall() {
           html: `
             <div style="text-align:center; margin-top:8px;">
               <img
-                src="https://res.cloudinary.com/dqqeavica/image/upload/v1765740540/instalacion_lydtcl.gif"
+                src="https://res.cloudinary.com/dqqeavica/image/upload/v1780053848/heartsync_ojmqxm.gif"
                 alt="Instalando app"
                 style="width:180px; max-width:70vw; height:auto; display:block; margin:0 auto 12px;"
               >
