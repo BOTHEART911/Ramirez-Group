@@ -665,7 +665,10 @@ function irAMenuRestaurante() {
     }
   ];
 
-  const visibles = TILES.filter(t => t.roles.indexOf(rol) >= 0);
+// DESARROLLADOR: acceso total a todos los tiles, sin importar la whitelist de cada uno
+  const visibles = (rol === 'DESARROLLADOR')
+    ? TILES
+    : TILES.filter(t => t.roles.indexOf(rol) >= 0);
 
   const grid = $('#restaurante-menu-grid');
   grid.innerHTML = '';
@@ -4815,7 +4818,11 @@ const Config = {
     const cached = this._readCache();
     if (cached) return cached;
     if (this._inflight) return this._inflight;
-    this._inflight = apiGet('getConfig').then(cfg => {
+    // Enviamos el id de usuario para que el backend decida si revela secretos
+    // (BB_API_KEY) — solo al DESARROLLADOR. apiGet serializa params en la query.
+    const u = state.user;
+    const qp = u ? { 'usuario.id': u.id } : {};
+    this._inflight = apiGet('getConfig', qp).then(cfg => {
       this._writeCache(cfg);
       this._inflight = null;
       return cfg;
@@ -5056,8 +5063,16 @@ PREVIEW_DATA: {
       const ta = $('#cfg-' + k);
       if (ta) ta.addEventListener('input', () => this.actualizarPreview(k));
     });
-    // Toggle visibilidad de BB_API_KEY (siempre marcada como solo-lectura)
-    // — sin acción, solo mostrar el hint.
+ // Toggle visibilidad del API Key (solo existe si el usuario es DESARROLLADOR)
+    const bbToggle = $('#cfg-bbkey-toggle');
+    if (bbToggle) {
+      bbToggle.addEventListener('click', () => {
+        const inp = $('#cfg-BB_API_KEY');
+        if (!inp) return;
+        inp.type = inp.type === 'password' ? 'text' : 'password';
+        bbToggle.textContent = inp.type === 'password' ? '👁' : '🙈';
+      });
+    }
   },
 
   renderSeccion(s) {
@@ -5083,8 +5098,13 @@ PREVIEW_DATA: {
       </section>`;
   },
 
+  esDev() {
+    return String(state.user?.rol || '').toUpperCase() === 'DESARROLLADOR';
+  },
+
   renderBody(key) {
     const c = this.cfg;
+    const dev = this.esDev();
     const v = (k, def) => escapeHtml(String(c[k] == null ? (def || '') : c[k]));
     switch (key) {
       case 'datos':
@@ -5116,8 +5136,9 @@ PREVIEW_DATA: {
               </label>
             </div>
           </div>
+        ${dev ? `
           <label>Pie del ticket (texto pequeño al final)</label>
-          <textarea id="cfg-RESTAURANTE_TICKET_PIE" rows="2">${v('RESTAURANTE_TICKET_PIE')}</textarea>`;
+          <textarea id="cfg-RESTAURANTE_TICKET_PIE" rows="2">${v('RESTAURANTE_TICKET_PIE')}</textarea>` : ''}`;
 
       case 'operacion':
         return `
@@ -5166,12 +5187,22 @@ PREVIEW_DATA: {
           </div>`;
 
       case 'whatsapp':
+        if (!dev) return '';   // sección WhatsApp completa: solo DESARROLLADOR
         return `
           <label>URL del bot WhatsApp</label>
           <input id="cfg-BB_API_URL" type="url" value="${v('BB_API_URL')}"
                  placeholder="https://app.builderbot.cloud/api/v2/..." />
+
+          <label>API Key del bot (BuilderBot)</label>
+          <div class="usr-pin-row">
+            <input id="cfg-BB_API_KEY" type="password" value="${v('BB_API_KEY')}"
+                   placeholder="bb-xxxxxxxx-..." autocomplete="off" spellcheck="false" />
+            <button type="button" id="cfg-bbkey-toggle" class="usr-pin-toggle"
+                    title="Mostrar / ocultar">👁</button>
+          </div>
           <p class="muted" style="font-size:0.72rem;">
-            La <b>API Key</b> del bot se edita solo desde la hoja CONFIGURACION (es un secreto).
+            🔒 Secreto. Solo visible para DESARROLLADOR. Se usa en el header
+            <code>x-api-builderbot</code> al enviar mensajes.
           </p>
 
           <label>Teléfono del dueño (recibe el resumen diario)</label>
@@ -5202,6 +5233,7 @@ PREVIEW_DATA: {
 
       case 'reservas':
         return `
+          ${dev ? `
           <label>ID del grupo de WhatsApp del equipo</label>
           <input id="cfg-WA_GRUPO_RESERVAS_ID" type="text" value="${v('WA_GRUPO_RESERVAS_ID', 'GBtxT6Grel2DcU4sWrGnpx')}"
                  placeholder="GBtxT6Grel2DcU4sWrGnpx" />
@@ -5214,7 +5246,7 @@ PREVIEW_DATA: {
                  placeholder="https://reservas.tu-dominio.com" />
           <p class="muted" style="font-size:0.72rem;">
             Sin el parámetro <code>?token=</code>. Se usa para construir el link que se envía al cliente en el WhatsApp #1.
-          </p>
+          </p>` : ''}
 
           ${this.renderTemplate('WA_TEMPLATE_RESERVA_CLIENTE',      'Plantilla #1: solicitud recibida (al cliente)')}
           ${this.renderTemplate('WA_TEMPLATE_RESERVA_GRUPO',        'Plantilla #2: nueva solicitud (al equipo del grupo)')}
@@ -5315,7 +5347,7 @@ if (key === 'horario') {
                                 'RESTAURANTE_DIRECCION','RESTAURANTE_LOGO_URL','RESTAURANTE_TICKET_PIE'];
       case 'operacion': return ['CAJA_DESCUENTO_MAX_PCT','PROPINA_SUGERIDA_PCT'];
       case 'tiempos':   return ['COCINA_WARN_MIN','COCINA_LATE_MIN','CAJA_WARN_MIN','CAJA_LATE_MIN'];
-      case 'whatsapp':  return ['BB_API_URL','WA_TELEFONO_DUENO',
+      case 'whatsapp':  return ['BB_API_URL','BB_API_KEY','WA_TELEFONO_DUENO',
                                 'WA_TEMPLATE_TICKET','WA_TEMPLATE_PLATO_LISTO','WA_TEMPLATE_CIERRE'];
       case 'horario':   return ['RESTAURANTE_HORA_APERTURA','RESTAURANTE_HORA_CIERRE'];
       case 'reservas':  return ['WA_GRUPO_RESERVAS_ID','RESERVAS_URL_PUBLICA',
