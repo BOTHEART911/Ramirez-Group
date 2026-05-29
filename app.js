@@ -5189,11 +5189,11 @@ PREVIEW_DATA: {
       case 'whatsapp':
         if (!dev) return '';   // sección WhatsApp completa: solo DESARROLLADOR
         return `
-          <label>URL del bot WhatsApp</label>
+          <label>URL del bot WhatsApp HeartSync</label>
           <input id="cfg-BB_API_URL" type="url" value="${v('BB_API_URL')}"
                  placeholder="https://app.builderbot.cloud/api/v2/..." />
 
-          <label>API Key del bot (BuilderBot)</label>
+          <label>API Key del bot HeartSync</label>
           <div class="usr-pin-row">
             <input id="cfg-BB_API_KEY" type="password" value="${v('BB_API_KEY')}"
                    placeholder="bb-xxxxxxxx-..." autocomplete="off" spellcheck="false" />
@@ -5202,7 +5202,7 @@ PREVIEW_DATA: {
           </div>
           <p class="muted" style="font-size:0.72rem;">
             🔒 Secreto. Solo visible para DESARROLLADOR. Se usa en el header
-            <code>x-api-builderbot</code> al enviar mensajes.
+            <code>x-api-HeartSync</code> al enviar mensajes.
           </p>
 
           <label>Teléfono del dueño (recibe el resumen diario)</label>
