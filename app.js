@@ -32,13 +32,13 @@ const NEGOCIO_RESTAURANTE_ID = 'NEG-001';
 const SESSION_KEY = 'rgSession';
 
 const SOUNDS = {
-  login:    'https://res.cloudinary.com/dqqeavica/video/upload/v1759184556/login_w0qtf6.mp3',
-  click:    'https://res.cloudinary.com/dqqeavica/video/upload/v1759011578/Keyboard_Enter_b9k2dc.mp3',
-  ok:       'https://res.cloudinary.com/dqqeavica/video/upload/v1759166346/correcto_kz0kme.mp3',
-  err:      'https://res.cloudinary.com/dqqeavica/video/upload/v1759166344/error_jfaiip.mp3',
-  warn:     'https://res.cloudinary.com/dqqeavica/video/upload/v1759166347/advertencia_b1hrok.mp3',
-  pedido:   'https://res.cloudinary.com/dqqeavica/video/upload/v1759166344/notificacion_bkpdoo.mp3',
-  caja:     'https://res.cloudinary.com/dqqeavica/video/upload/v1759166344/notificacion_bkpdoo.mp3'
+  login: 'https://res.cloudinary.com/dqqeavica/video/upload/v1759011577/Siri_star_g1owy4.mp3',
+  click:    https://res.cloudinary.com/dqqeavica/video/upload/v1759011577/Namedrop_Popup_ale2zy.mp3',
+  ok:       'https://res.cloudinary.com/dqqeavica/video/upload/v1759011578/Keyboard_Enter_b9k2dc.mp3',
+  err:      'https://res.cloudinary.com/dqqeavica/video/upload/v1759011578/Low_battery_d5qua1.mp3',
+  warn:     'https://res.cloudinary.com/dqqeavica/video/upload/v1759011578/Low_battery_d5qua1.mp3',
+  pedido:   'https://res.cloudinary.com/dqqeavica/video/upload/v1759767435/Notificacion_d1woxv.mp3'
+  caja:     'https://res.cloudinary.com/dqqeavica/video/upload/v1759767435/Notificacion_d1woxv.mp3'
 };
 
 const ICONOS = {
@@ -2212,6 +2212,15 @@ abrirPedidoExistente(pedidoId, mesaId) {
       });
     }
 
+     // Botón "Liberar mesa": SOLO visible si el pedido existe y no tiene
+    // NINGÚN producto (ni ingresado ni servido). Permite cerrar una mesa
+    // abierta por error sin dejar fila fantasma en PEDIDOS.
+    const btnCerrar = $('#pd-btn-cerrar-mesa');
+    if (btnCerrar) {
+      const sinProductos = itemsArr.length === 0;
+      btnCerrar.classList.toggle('hidden', !(sinProductos && !!p.id));
+    }
+
     $('#pd-subtotal').textContent = fmtPesos(meta.subtotal || 0);
     $('#pd-total').textContent = fmtPesos(meta.total || 0);
     const descRow = $('#pd-descuento-row');
@@ -2234,6 +2243,12 @@ abrirPedidoExistente(pedidoId, mesaId) {
       btnCuenta.classList.toggle('hidden', !(puedePedir || yaPedida));
       btnCuenta.disabled = yaPedida;
       btnCuenta.textContent = yaPedida ? '💰 Cuenta pedida' : '💰 Pedir cuenta';
+    }
+
+     const btnCerrar = $('#pd-btn-cerrar-mesa');
+    if (btnCerrar && !btnCerrar._bound) {
+      btnCerrar.addEventListener('click', () => this.cerrarMesa());
+      btnCerrar._bound = true;
     }
   },
 
@@ -2313,6 +2328,41 @@ abrirPedidoExistente(pedidoId, mesaId) {
     this.desengancharRTDBPedido();
     this.pedidoActual = null;
     showView('tomar-pedido');
+  },
+
+   /* ────────────────────────────────────────────
+     LIBERAR / CERRAR MESA VACÍA
+     Solo cuando el pedido no tiene productos. Borra
+     la fila en la hoja PEDIDOS y deja la mesa LIBRE.
+     ──────────────────────────────────────────── */
+  async cerrarMesa() {
+    const p = this.pedidoActual;
+    if (!p || !p.id) return;
+    if (Object.keys(p.items || {}).length > 0) {
+      return alertWarn('La mesa tiene productos',
+        'Solo puedes liberar una mesa que no tenga productos.');
+    }
+    const numero = (p.meta && p.meta.mesaNumero) || '?';
+    const ok = await confirmar('Liberar mesa',
+      `¿Liberar la <b>Mesa ${escapeHtml(String(numero))}</b>? El pedido está vacío, se eliminará y la mesa quedará libre.`,
+      'Sí, liberar');
+    if (!ok) return;
+    // Desenganchar el listener ANTES del POST: al borrar el backend el nodo
+    // del RTDB, el snapshot null dispararía el aviso "pedido cerrado".
+    this.desengancharRTDBPedido();
+    startLoading();
+    try {
+      await apiPost('cerrarMesaVacia', withUser({ pedidoId: p.id }));
+      stopLoading();
+      playSoundOnce(SOUNDS.ok);
+      Toast && Toast.fire({ icon: 'success', title: 'Mesa liberada' });
+      this.volverAGrilla();
+    } catch (e) {
+      stopLoading();
+      // Reconectar el listener para seguir en el detalle si falló
+      this.engancharRTDBPedido(p.id);
+      alertErr('No se pudo liberar', e.message);
+    }
   },
 
   /* ────────────────────────────────────────────
