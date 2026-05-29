@@ -519,6 +519,17 @@ textarea { resize: vertical; min-height: 80px; }
   border-radius: var(--r-md);
 }
 
+/* Banner de copyright (login, inicio, menú) — pequeño y centrado.
+   Solo afecta a <img class="brand" alt="Banner">, NO al logo del instalador. */
+img.brand[alt="Banner"] {
+  display: block;
+  width: 150px;
+  max-width: 55%;
+  height: auto;
+  margin: 18px auto 4px;
+  opacity: 0.9;
+}
+
 /* ============================================================
    INICIO MULTI-NEGOCIO
    ============================================================ */
@@ -2089,6 +2100,14 @@ textarea { resize: vertical; min-height: 80px; }
 .app-header__icon--add:active {
   transform: scale(0.94);
 }
+
+/* Botón "Liberar mesa" (header de pedido-detalle) */
+.app-header__icon--danger {
+  background: rgba(220, 38, 38, 0.10);
+  color: var(--error);
+}
+.app-header__icon--danger:hover  { background: var(--error); color: #fff; }
+.app-header__icon--danger:active { transform: scale(0.94); }
 
 /* Ítem optimista: aún no confirmado por el backend */
 .pd-item.is-tmp {
