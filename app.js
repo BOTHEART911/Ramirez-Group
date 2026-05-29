@@ -4933,30 +4933,50 @@ SECCIONES: [
 
   // Defaults usados como hints visuales y para preview de plantillas
   DEFAULTS: {
-    WA_TEMPLATE_TICKET:
+   WA_TEMPLATE_TICKET:
       '🍽️ *¡Gracias por visitarnos, {cliente}!* 🐟\n\n' +
-      '✨ *{razonSocial}*\n\n' +
+      '✨ *{razonSocial}*\n' +
+      '📍 {direccion}\n\n' +
+      '━━━━━━━━━━━━━━━━━\n' +
+      '🧾 *Resumen de tu pedido*\n' +
+      '━━━━━━━━━━━━━━━━━\n' +
+      '{items}\n' +
+      '━━━━━━━━━━━━━━━━━\n' +
+      '{descuentoLinea}\n' +
       '💰 *TOTAL:* {total}\n' +
-      '💳 Método: {metodo}\n\n' +
+      '💳 Método: {metodo}\n' +
       '{ticketLink}\n' +
       '{comprobante}\n\n' +
-      '💚 Te esperamos pronto.',
+      '💚 Te esperamos pronto. Para cualquier comentario, escríbenos a este mismo número.\n' +
+      '_{pie}_',
     WA_TEMPLATE_PLATO_LISTO:
       '🍽️ *Plato listo*\n\n' +
       'Mesa {mesa}\n' +
       '{plato}\n\n' +
       'Por favor recoger en cocina.',
-WA_TEMPLATE_CIERRE:
+    WA_TEMPLATE_CIERRE:
       '🌙 *ANCLAJE DEL DÍA*\n' +
       '*{razonSocial}*\n\n' +
       '📅 {fechaCorte}\n' +
       '👤 Ancló: {usuarioNombre} ({rol})\n' +
       '⚙️ Modo: {modo}\n\n' +
-      '💰 Total ventas: {totalVentas}\n' +
-      '*Total neto: {totalNeto}*\n' +
-      '💵 Efectivo: {efectivo} (dif {difEfectivo})\n' +
-      '📱 Transfer: {transfer} (dif {difTransfer})\n\n' +
-      '🏆 Top 3:\n{top3}\n\n' +
+      '─────────────────\n' +
+      '💰 *Ventas*\n' +
+      'Pedidos cobrados: {cantPedidos}\n' +
+      'Total ventas: {totalVentas}\n' +
+      '*Total neto: {totalNeto}*\n\n' +
+      '─────────────────\n' +
+      '💵 *Efectivo*\n' +
+      'Sistema: {efectivo}\n' +
+      'Declarado: {efectivoDeclarado}\n' +
+      'Diferencia: {difEfectivo}\n\n' +
+      '📱 *Transferencia*\n' +
+      'Sistema: {transfer}\n' +
+      'Declarado: {transferDeclarado}\n' +
+      'Diferencia: {difTransfer}\n\n' +
+      '─────────────────\n' +
+      '🏆 *Top 3 productos*\n' +
+      '{top3}\n\n' +
       '📝 {observacion}',
     // Fase 7 / Bloque Q — Reservas
     WA_TEMPLATE_RESERVA_CLIENTE:
@@ -4991,15 +5011,20 @@ WA_TEMPLATE_CIERRE:
 
 PREVIEW_DATA: {
     cliente: 'Juan', razonSocial: 'Restaurante y Pescadería Ramírez',
+    direccion: 'Calle 1 # 23-45, Bogotá',
     total: '$ 85.000', metodo: 'EFECTIVO',
-    ticketLink: '🧾 Ver ticket: https://...',
+    items: '2× BANDEJA DE TILAPIA            $ 70.000\n1× CERVEZA                       $ 15.000',
+    descuentoLinea: '',
+    ticketLink: '🧾 *Ver tu ticket completo:*\nhttps://...',
     comprobante: '',
+    pie: 'Creado por: Oscar Polania | Cel: 3103230712',
     mesero: 'Carlos', mesa: '5', plato: '2× BANDEJA DE TILAPIA',
     fechaCorte: '25/05/2026 22:00:00',
     usuarioNombre: 'Oscar Polania', rol: 'SUPERUSUARIO', modo: 'MANUAL',
+    cantPedidos: '32',
     totalVentas: '$ 1.250.000', totalNeto: '$ 1.200.000',
-    efectivo: '$ 800.000', difEfectivo: '$ 0',
-    transfer: '$ 400.000', difTransfer: '$ 0',
+    efectivo: '$ 800.000', efectivoDeclarado: '$ 800.000', difEfectivo: '$ 0',
+    transfer: '$ 400.000', transferDeclarado: '$ 400.000', difTransfer: '$ 0',
     top3: '1. BANDEJA DE TILAPIA × 8\n2. CALDO DE PESCADO × 5\n3. CERVEZA × 12',
     observacion: 'Sin novedades.',
     // Fase 7 / Bloque Q — Reservas
@@ -5075,9 +5100,13 @@ PREVIEW_DATA: {
     }
   },
 
-  renderSeccion(s) {
+renderSeccion(s) {
     const open = this.abiertas.has(s.key);
     const body = this.renderBody(s.key);
+    // WhatsApp y Reservas: si NO es DEV, su contenido es solo-lectura
+    // (plantillas), así que no mostramos el botón Guardar.
+    const dev = this.esDev();
+    const soloLecturaSeccion = !dev && (s.key === 'whatsapp' || s.key === 'reservas');
     return `
       <section class="cfg-section ${open ? 'open' : ''}">
         <button type="button" class="cfg-section__head" data-cfg-toggle="${s.key}">
@@ -5089,11 +5118,12 @@ PREVIEW_DATA: {
         </button>
         <div class="cfg-section__body">
           ${body}
+          ${soloLecturaSeccion ? '' : `
           <div class="cfg-section__foot">
             <button class="btn btn-primary btn-sm" data-cfg-save="${s.key}">
               💾 Guardar sección
             </button>
-          </div>
+          </div>`}
         </div>
       </section>`;
   },
@@ -5187,13 +5217,13 @@ PREVIEW_DATA: {
           </div>`;
 
       case 'whatsapp':
-        if (!dev) return '';   // sección WhatsApp completa: solo DESARROLLADOR
         return `
-          <label>URL del bot WhatsApp HeartSync</label>
+          ${dev ? `
+          <label>URL del bot WhatsApp</label>
           <input id="cfg-BB_API_URL" type="url" value="${v('BB_API_URL')}"
                  placeholder="https://app.builderbot.cloud/api/v2/..." />
 
-          <label>API Key del bot HeartSync</label>
+          <label>API Key del bot (BuilderBot)</label>
           <div class="usr-pin-row">
             <input id="cfg-BB_API_KEY" type="password" value="${v('BB_API_KEY')}"
                    placeholder="bb-xxxxxxxx-..." autocomplete="off" spellcheck="false" />
@@ -5202,12 +5232,13 @@ PREVIEW_DATA: {
           </div>
           <p class="muted" style="font-size:0.72rem;">
             🔒 Secreto. Solo visible para DESARROLLADOR. Se usa en el header
-            <code>x-api-HeartSync</code> al enviar mensajes.
+            <code>x-api-builderbot</code> al enviar mensajes.
           </p>
 
           <label>Teléfono del dueño (recibe el resumen diario)</label>
           <input id="cfg-WA_TELEFONO_DUENO" type="tel" inputmode="numeric" maxlength="10"
                  value="${v('WA_TELEFONO_DUENO')}" placeholder="3001234567" />
+          ` : ''}
 
           ${this.renderTemplate('WA_TEMPLATE_TICKET', 'Plantilla: ticket al cliente')}
           ${this.renderTemplate('WA_TEMPLATE_PLATO_LISTO', 'Plantilla: plato listo (mesero)')}
@@ -5256,15 +5287,23 @@ PREVIEW_DATA: {
   },
 
   renderTemplate(clave, label) {
+    const dev = this.esDev();
     const valor = String(this.cfg[clave] == null ? '' : this.cfg[clave]);
     const defStr = this.DEFAULTS[clave] || '';
-    const previewStr = this.calcularPreview(valor || defStr);
+    // Camino A: el textarea SIEMPRE muestra contenido editable. Si la hoja
+    // está vacía, precargamos el default REAL del backend para que el DEV
+    // vea y edite el texto verdadero (no uno pobre).
+    const textoMostrado = valor || defStr;
+    const previewStr = this.calcularPreview(textoMostrado);
     return `
       <div class="cfg-template">
         <label>${escapeHtml(label)}</label>
-        <textarea id="cfg-${clave}" rows="7" placeholder="Dejar vacío para usar la plantilla por defecto">${escapeHtml(valor)}</textarea>
+        <textarea id="cfg-${clave}" rows="9" ${dev ? '' : 'readonly'}
+                  placeholder="Plantilla por defecto">${escapeHtml(textoMostrado)}</textarea>
         <p class="muted" style="font-size:0.7rem; margin: 2px 0 6px;">
-          ${valor ? 'Plantilla personalizada activa.' : 'Vacío → se usará la plantilla por defecto.'}
+          ${dev
+            ? (valor ? 'Plantilla personalizada activa.' : 'Mostrando la plantilla por defecto. Edítala y guarda para personalizarla.')
+            : '🔒 Solo lectura. Solo el DESARROLLADOR puede editar las plantillas.'}
         </p>
         <div class="cfg-preview-label">Vista previa con datos de ejemplo:</div>
         <pre class="cfg-preview" id="cfg-preview-${clave}">${escapeHtml(previewStr)}</pre>
@@ -5359,6 +5398,10 @@ if (key === 'horario') {
 
   async guardarSeccion(key) {
     if (this.guardando) return;
+    // Blindaje: WhatsApp y Reservas solo las guarda el DESARROLLADOR
+    if ((key === 'whatsapp' || key === 'reservas') && !this.esDev()) {
+      return alertWarn('Solo lectura', 'Solo el DESARROLLADOR puede editar esta sección.');
+    }
     const claves = this.clavesDeSeccion(key);
     const datos = {};
     claves.forEach(k => {
