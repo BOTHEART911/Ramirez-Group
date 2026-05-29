@@ -23,13 +23,13 @@
 
   "icons": [
     {
-      "src": "https://res.cloudinary.com/dqqeavica/image/upload/v1778181656/Restaurante_vrwguv.png",
+      "src": "https://res.cloudinary.com/dqqeavica/image/upload/v1780057326/logo_ramirez_big1sd.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "https://res.cloudinary.com/dqqeavica/image/upload/v1778181656/Restaurante_vrwguv.png",
+      "src": "https://res.cloudinary.com/dqqeavica/image/upload/v1780057326/logo_ramirez_big1sd.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
