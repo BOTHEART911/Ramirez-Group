@@ -2243,12 +2243,6 @@ abrirPedidoExistente(pedidoId, mesaId) {
       btnCuenta.disabled = yaPedida;
       btnCuenta.textContent = yaPedida ? '💰 Cuenta pedida' : '💰 Pedir cuenta';
     }
-
-     const btnCerrar = $('#pd-btn-cerrar-mesa');
-    if (btnCerrar && !btnCerrar._bound) {
-      btnCerrar.addEventListener('click', () => this.cerrarMesa());
-      btnCerrar._bound = true;
-    }
   },
 
   labelEstado(estado) {
