@@ -2335,11 +2335,9 @@ abrirPedidoExistente(pedidoId, mesaId) {
       return alertWarn('La mesa tiene productos',
         'Solo puedes liberar una mesa que no tenga productos.');
     }
-    const numero = (p.meta && p.meta.mesaNumero) || '?';
-    const ok = await confirmar('Liberar mesa',
-      `¿Liberar la <b>Mesa ${escapeHtml(String(numero))}</b>? El pedido está vacío, se eliminará y la mesa quedará libre.`,
-      'Sí, liberar');
-    if (!ok) return;
+    // Sin confirmar ni Toast. Tap único → la mesa volviendo a gris (LIBRE)
+    // en la grilla es el feedback. Si fue accidental, basta tocar la mesa
+    // de nuevo (estaba vacía, se recrea el pedido).
     // Desenganchar el listener ANTES del POST: al borrar el backend el nodo
     // del RTDB, el snapshot null dispararía el aviso "pedido cerrado".
     this.desengancharRTDBPedido();
@@ -2348,7 +2346,6 @@ abrirPedidoExistente(pedidoId, mesaId) {
       await apiPost('cerrarMesaVacia', withUser({ pedidoId: p.id }));
       stopLoading();
       playSoundOnce(SOUNDS.ok);
-      Toast && Toast.fire({ icon: 'success', title: 'Mesa liberada' });
       this.volverAGrilla();
     } catch (e) {
       stopLoading();
@@ -2357,7 +2354,7 @@ abrirPedidoExistente(pedidoId, mesaId) {
       alertErr('No se pudo liberar', e.message);
     }
   },
-
+   
   /* ────────────────────────────────────────────
      CATÁLOGO EMBEBIDO
      ──────────────────────────────────────────── */
