@@ -4958,6 +4958,12 @@ SECCIONES: [
       'Mesa {mesa}\n' +
       '{plato}\n\n' +
       'Por favor recoger en cocina.',
+     WA_TEMPLATE_CAJA_CUENTA:
+      '💰 *Cuenta solicitada*\n\n' +
+      'Mesa {mesa}\n' +
+      'Mesero: {mesero}\n' +
+      'Total: {total}\n\n' +
+      'El cliente está pidiendo la cuenta.',
     WA_TEMPLATE_CIERRE:
       '🌙 *ANCLAJE DEL DÍA*\n' +
       '*{razonSocial}*\n\n' +
@@ -5087,7 +5093,7 @@ PREVIEW_DATA: {
     const fileLogo = $('#cfg-logo-file');
     if (fileLogo) fileLogo.addEventListener('change', () => this.subirLogo(fileLogo));
     // Preview plantillas
-    ['WA_TEMPLATE_TICKET','WA_TEMPLATE_PLATO_LISTO','WA_TEMPLATE_CIERRE',
+   ['WA_TEMPLATE_TICKET','WA_TEMPLATE_PLATO_LISTO','WA_TEMPLATE_CAJA_CUENTA','WA_TEMPLATE_CIERRE',
      'WA_TEMPLATE_RESERVA_CLIENTE','WA_TEMPLATE_RESERVA_GRUPO','WA_TEMPLATE_RESERVA_CONFIRMACION'].forEach(k => {
       const ta = $('#cfg-' + k);
       if (ta) ta.addEventListener('input', () => this.actualizarPreview(k));
@@ -5264,6 +5270,7 @@ renderSeccion(s) {
 
           ${this.renderTemplate('WA_TEMPLATE_TICKET', 'Plantilla: ticket al cliente')}
           ${this.renderTemplate('WA_TEMPLATE_PLATO_LISTO', 'Plantilla: plato listo (mesero)')}
+          ${this.renderTemplate('WA_TEMPLATE_CAJA_CUENTA', 'Plantilla: cuenta solicitada (caja)')}
           ${this.renderTemplate('WA_TEMPLATE_CIERRE', 'Plantilla: resumen diario al dueño')}`;
 
    case 'horario':
@@ -5409,7 +5416,8 @@ if (key === 'horario') {
       case 'operacion': return ['CAJA_DESCUENTO_MAX_PCT','PROPINA_SUGERIDA_PCT'];
       case 'tiempos':   return ['COCINA_WARN_MIN','COCINA_LATE_MIN','CAJA_WARN_MIN','CAJA_LATE_MIN'];
       case 'whatsapp':  return ['BB_API_URL','BB_API_KEY','WA_TELEFONO_DUENO',
-                                'WA_TEMPLATE_TICKET','WA_TEMPLATE_PLATO_LISTO','WA_TEMPLATE_CIERRE'];
+                                'WA_TEMPLATE_TICKET','WA_TEMPLATE_PLATO_LISTO',
+                                'WA_TEMPLATE_CAJA_CUENTA','WA_TEMPLATE_CIERRE'];
       case 'horario':   return ['RESTAURANTE_HORA_APERTURA','RESTAURANTE_HORA_CIERRE'];
       case 'reservas':  return ['WA_GRUPO_RESERVAS_ID','RESERVAS_URL_PUBLICA',
                                 'WA_TEMPLATE_RESERVA_CLIENTE','WA_TEMPLATE_RESERVA_GRUPO',
