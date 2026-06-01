@@ -3617,6 +3617,36 @@ img.brand[alt="Banner"] {
   font-weight: 800;
 }
 
+/* Cambio 2 — Check de propina opcional en el modal de cobro */
+.cobro__propina-toggle {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 0 !important;
+  padding: 8px 12px;
+  background: var(--accent-soft);
+  border: 1px dashed var(--accent);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  color: var(--text-soft) !important;
+}
+.cobro__propina-toggle input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  margin: 0;
+  flex-shrink: 0;
+}
+.cobro__propina-toggle b {
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-weight: 800;
+}
+
 /* ============================================================
    ============================================================
    FASE 6 / BLOQUE K — VISTA AUDITORÍA
