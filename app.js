@@ -3286,6 +3286,7 @@ desenganchar() {
 
     const list = Object.entries(this.pedidos)
       .map(([id, p]) => ({ id, ...p }))
+      .filter(o => !(this._cobrando && this._cobrando[o.id]))
       .sort((a, b) => {
         // Primero los que pidieron cuenta, ordenados por fecha
         const aPide = a.pidiendoCuenta ? 0 : 1;
@@ -3400,9 +3401,12 @@ tickEsperas() {
       // Fase 4 — ticket bajo demanda
       ticketUrl:         null,
       ticketGenerando:   false,
-      // Fase 5 / Bloque G — propina sugerida (informativa, no se cobra)
+    // Fase 5 / Bloque G — propina sugerida (informativa, no se cobra)
       propinaSugeridaPct: propinaPct,
-      propinaSugerida:    Math.round(totalNum * propinaPct / 100)
+      propinaSugerida:    Math.round(totalNum * propinaPct / 100),
+      // Cambio 2 — propina opcional (check) + observación
+      propinaIncluida:    false,
+      observaciones:      ''
     };
     st.descuentoMaxPct = this.config.descuentoMaxPct;
 
@@ -3419,12 +3423,11 @@ tickEsperas() {
       focusConfirm: false,
       didOpen: () => self.bindModalCobro(p, st),
       preConfirm: () => self.validarCobro(p, st)
-    }).then(async (res) => {
+    }).then((res) => {
       self._modalAbierto = false;
-      // Repintar la grilla con los datos más frescos que llegaron mientras el modal estuvo abierto
-      self.render();
-      if (!res.isConfirmed) return;
-      await self.ejecutarCobro(p, st, res.value);
+      if (!res.isConfirmed) { self.render(); return; }
+      // Optimista: ejecutarCobro quita la tarjeta YA y hace el POST en background.
+      self.ejecutarCobro(p, st, res.value);
     });
   },
 
@@ -3473,9 +3476,11 @@ htmlModalCobro(p, st) {
           <span>TOTAL</span>
           <span id="cb-total">${fmtPesos(st.total)}</span>
         </div>
-        <div class="cobro__propina" id="cb-propina-hint">
-          💡 Propina sugerida (${st.propinaSugeridaPct}%): <b id="cb-propina-val">${fmtPesos(st.propinaSugerida)}</b>
-        </div>
+       <label class="cobro__propina-toggle" id="cb-propina-hint">
+          <input type="checkbox" id="cb-propina-chk" />
+          <span>💡 Incluir propina sugerida (${st.propinaSugeridaPct}%):
+            <b id="cb-propina-val">${fmtPesos(st.propinaSugerida)}</b></span>
+        </label>
       </div>
 
       <label>Método de pago</label>
@@ -3505,6 +3510,9 @@ htmlModalCobro(p, st) {
             <input type="file" id="cb-comprobante" accept="image/*" hidden />
           </label>
         </div>
+
+        <label>Observación (opcional)</label>
+        <textarea id="cb-obs" rows="2" placeholder="Notas del cobro (opcional)…">${escapeHtml(st.observaciones || '')}</textarea>
       </div>
     `;
   },
@@ -3610,7 +3618,7 @@ bindModalCobro(p, st) {
         statusCli.className = 'cobro__cli-status is-loading';
         try {
           const r = await apiGet('buscarCliente', { telefono: v });
-          if (r && r.encontrado) {
+         if (r && r.encontrado) {
             st.clienteIdExistente = r.id;
             if (!inpNombre.value.trim()) {
               inpNombre.value = r.nombre;
@@ -3618,6 +3626,7 @@ bindModalCobro(p, st) {
             }
             statusCli.textContent = '✓';
             statusCli.className = 'cobro__cli-status is-ok';
+            updTicketBtn();   // Cambio 2 — habilita "Generar ticket" para cliente existente
           } else {
             statusCli.textContent = '+';
             statusCli.className = 'cobro__cli-status is-new';
@@ -3679,6 +3688,18 @@ bindModalCobro(p, st) {
       } catch (err) { alertErr('Error', err.message); }
     });
 
+// Cambio 2 — Check propina (no se suma al total; solo se registra)
+    const chkProp = $('#cb-propina-chk');
+    if (chkProp) {
+      chkProp.addEventListener('change', () => { st.propinaIncluida = chkProp.checked; });
+    }
+
+    // Cambio 2 — Observación opcional
+    const obsEl = $('#cb-obs');
+    if (obsEl) {
+      obsEl.addEventListener('input', () => { st.observaciones = obsEl.value.trim(); });
+    }
+
     // Fase 4 — pintar estado inicial del botón de ticket
     updTicketBtn();
   },
@@ -3730,7 +3751,7 @@ bindModalCobro(p, st) {
       pagos.push({ metodo: 'EFECTIVO',      valor: ef });
       pagos.push({ metodo: 'TRANSFERENCIA', valor: tr, comprobanteUrl: null });
     }
-    return {
+   return {
       pagos,
       descuentoPct:   st.descuentoPct,
       descuentoValor: st.descuentoValor,
@@ -3740,49 +3761,61 @@ bindModalCobro(p, st) {
       // Fase 4 — cliente
       esGenerico:       st.esGenerico,
       clienteNombre:    st.clienteNombre,
-      clienteTelefono:  st.clienteTelefono
+      clienteTelefono:  st.clienteTelefono,
+      // Cambio 2 — propina (solo si el check está activo) + observación
+      propina:          st.propinaIncluida ? (Number(st.propinaSugerida) || 0) : 0,
+      observaciones:    st.observaciones || ''
     };
   },
 
-  async ejecutarCobro(p, st, datos) {
-    startLoading();
+ async ejecutarCobro(p, st, datos) {
+    const pedidoId = st.pedidoId;
+    // Optimista: marcar "cobrando" y sacar la tarjeta de la grilla de inmediato.
+    this._cobrando = this._cobrando || {};
+    this._cobrando[pedidoId] = true;
+    const snapshot = this.pedidos[pedidoId];   // por si hay que revertir
+    this.render();
+    playSoundOnce(SOUNDS.caja);
+
     try {
-      // Fase 4 — Asignar cliente al pedido antes de cobrar
-      await apiPost('asignarClientePedido', withUser({
-        pedidoId:   st.pedidoId,
-        esGenerico: !!datos.esGenerico,
-        cliente: datos.esGenerico ? null : {
+      // 1. Comprobante primero (necesitamos la URL antes de cobrar)
+      let comprobanteUrl = null;
+      if (datos.comprobanteB64) {
+        const up = await apiPost('subirComprobante', withUser({
+          pedidoId:  pedidoId,
+          filename:  datos.comprobanteFn,
+          base64:    datos.comprobanteB64
+        }));
+        comprobanteUrl = up.url || up.URL || null;
+        datos.pagos.forEach(pg => {
+          if (pg.metodo === 'TRANSFERENCIA') pg.comprobanteUrl = comprobanteUrl;
+        });
+      }
+
+      // 2. Cobrar — asigna cliente, propina y observación en UNA sola llamada
+      await apiPost('cobrarPedido', withUser({
+        pedidoId:       pedidoId,
+        descuentoPct:   datos.descuentoPct,
+        descuentoValor: datos.descuentoValor,
+        total:          datos.total,
+        pagos:          datos.pagos,
+        propina:        datos.propina,
+        observaciones:  datos.observaciones,
+        // cliente en la misma llamada (el backend lo asigna antes de cobrar)
+        esGenerico:     !!datos.esGenerico,
+        cliente:        datos.esGenerico ? null : {
           nombre:   datos.clienteNombre,
           telefono: datos.clienteTelefono
         }
       }));
 
-      let comprobanteUrl = null;
-      if (datos.comprobanteB64) {
-        const up = await apiPost('subirComprobante', withUser({
-          pedidoId:  p.id || st.pedidoId,
-          filename:  datos.comprobanteFn,
-          base64:    datos.comprobanteB64
-        }));
-        comprobanteUrl = up.url || up.URL || null;
-        // Asignar la URL al pago de transferencia
-        datos.pagos.forEach(pg => {
-          if (pg.metodo === 'TRANSFERENCIA') pg.comprobanteUrl = comprobanteUrl;
-        });
-      }
-     await apiPost('cobrarPedido', withUser({
-        pedidoId:       st.pedidoId,
-        descuentoPct:   datos.descuentoPct,
-        descuentoValor: datos.descuentoValor,
-        total:          datos.total,
-        pagos:          datos.pagos
-      }));
-      stopLoading();
-      playSoundOnce(SOUNDS.caja);
-      // Sin Toast — la tarjeta desapareciendo de la grilla es el feedback.
-      // Optimiza el tiempo entre cobros.
- } catch (e) {
-      stopLoading();
+      // OK — el listener RTDB ya quitó el nodo; soltamos el flag.
+      delete this._cobrando[pedidoId];
+    } catch (e) {
+      // Revertir: devolver la tarjeta a la grilla
+      delete this._cobrando[pedidoId];
+      if (snapshot) this.pedidos[pedidoId] = snapshot;
+      this.render();
       alertErr('Error al cobrar', e.message);
     }
   },
@@ -3971,6 +4004,11 @@ const Anclaje = {
           <span class="anc-row__lbl">Total neto</span>
           <span class="anc-row__val">${fmtPesos(p.totalNeto)}</span>
         </div>
+        ${(p.propinaSistema || 0) > 0 ? `
+        <div class="anc-row">
+          <span class="anc-row__lbl">🎁 Propinas (informativo)</span>
+          <span class="anc-row__val">${fmtPesos(p.propinaSistema)}</span>
+        </div>` : ''}
       </div>
 
       <div class="anc-card">
@@ -4157,6 +4195,7 @@ const Anclaje = {
     const html = `
       <div class="anc-confirm">
         <div class="anc-confirm__row"><span>Total neto</span><b>${fmtPesos(p.totalNeto)}</b></div>
+        ${(p.propinaSistema || 0) > 0 ? `<div class="anc-confirm__row"><span>🎁 Propinas (informativo)</span><b>${fmtPesos(p.propinaSistema)}</b></div>` : ''}
         <div class="anc-confirm__row"><span>Pedidos cobrados</span><b>${p.cantPedidos}</b></div>
         <hr style="border:0;border-top:1px dashed var(--border);margin:10px 0;" />
         <div class="anc-confirm__row"><span>Efectivo sistema</span><b>${fmtPesos(p.efectivoSistema)}</b></div>
@@ -4232,6 +4271,7 @@ const Anclaje = {
             <div class="anc-confirm__row"><span>Total ventas</span><b>${fmtPesos(a.totalVentas)}</b></div>
             ${a.totalDescuentos > 0 ? `<div class="anc-confirm__row"><span>Descuentos</span><b>-${fmtPesos(a.totalDescuentos)}</b></div>` : ''}
             <div class="anc-confirm__row anc-confirm__row--total"><span>Total neto</span><b>${fmtPesos(a.totalNeto)}</b></div>
+            ${(a.propinaSistema || 0) > 0 ? `<div class="anc-confirm__row"><span>🎁 Propinas (informativo)</span><b>${fmtPesos(a.propinaSistema)}</b></div>` : ''}
             <div class="anc-confirm__row"><span>Pedidos</span><b>${a.cantPedidos}</b></div>
             <hr style="border:0;border-top:1px dashed var(--border);margin:10px 0;" />
             <div class="anc-confirm__row"><span>Efectivo sistema</span><b>${fmtPesos(a.efectivoSistema)}</b></div>
@@ -6620,11 +6660,17 @@ const Balances = {
               <span class="bal-donut-legend__lbl">💵 Efectivo</span>
               <span class="bal-donut-legend__val">${fmtPesos(a.totalEfectivo)} <b>(${Math.round(pctEf * 100)}%)</b></span>
             </div>
-            <div class="bal-donut-legend__row">
+           <div class="bal-donut-legend__row">
               <span class="bal-donut-legend__dot bal-donut-legend__dot--tr"></span>
               <span class="bal-donut-legend__lbl">📱 Transferencia</span>
               <span class="bal-donut-legend__val">${fmtPesos(a.totalTransferencia)} <b>(${Math.round(pctTr * 100)}%)</b></span>
             </div>
+            ${(a.totalPropinas || 0) > 0 ? `
+            <div class="bal-donut-legend__row" style="border-top:1px dashed var(--border); padding-top:8px; margin-top:2px;">
+              <span class="bal-donut-legend__dot" style="background:var(--accent);"></span>
+              <span class="bal-donut-legend__lbl">🎁 Propinas <small>(no entran en ventas)</small></span>
+              <span class="bal-donut-legend__val"><b>${fmtPesos(a.totalPropinas)}</b></span>
+            </div>` : ''}
           </div>
         </div>
       </section>`;
@@ -6918,6 +6964,7 @@ const Balances = {
     rowKpi('Ticket promedio', a.ticketPromedio, ant?.ticketPromedio);
     rowKpi('Efectivo',        a.totalEfectivo,  ant?.totalEfectivo);
     rowKpi('Transferencia',   a.totalTransferencia, ant?.totalTransferencia);
+    rowKpi('Propinas (informativo)', a.totalPropinas, ant?.totalPropinas);
     rowKpi('Descuentos',      a.totalDescuentos, null);
 
     sec('VENTAS POR DÍA');
