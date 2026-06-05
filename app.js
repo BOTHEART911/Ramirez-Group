@@ -5149,36 +5149,15 @@ PREVIEW_DATA: {
       const ta = $('#cfg-' + k);
       if (ta) ta.addEventListener('input', () => this.actualizarPreview(k));
     });
- // Toggle visibilidad del API Key (solo existe si el usuario es DESARROLLADOR)
-    const bbToggle = $('#cfg-bbkey-toggle');
-    if (bbToggle) {
-      bbToggle.addEventListener('click', () => {
-        const inp = $('#cfg-BB_API_KEY');
+// Mostrar / ocultar todos los campos secretos de WhatsApp
+    $$('[data-toggle]', cont).forEach(b => {
+      b.addEventListener('click', () => {
+        const inp = $('#' + b.dataset.toggle);
         if (!inp) return;
         inp.type = inp.type === 'password' ? 'text' : 'password';
-        bbToggle.textContent = inp.type === 'password' ? '👁' : '🙈';
+        b.textContent = inp.type === 'password' ? '👁' : '🙈';
       });
-    }
-
-   const bbUrlToggle = $('#cfg-bburl-toggle');
-if (bbUrlToggle) {
-  bbUrlToggle.addEventListener('click', () => {
-    const inp = $('#cfg-BB_API_URL');
-    if (!inp) return;
-    inp.type = inp.type === 'password' ? 'text' : 'password';
-    bbUrlToggle.textContent = inp.type === 'password' ? '👁' : '🙈';
-  });
-}
-
-     const bbMgrToggle = $('#cfg-bbmgr-toggle');
-    if (bbMgrToggle) {
-      bbMgrToggle.addEventListener('click', () => {
-        const inp = $('#cfg-BB_MANAGER_API');
-        if (!inp) return;
-        inp.type = inp.type === 'password' ? 'text' : 'password';
-        bbMgrToggle.textContent = inp.type === 'password' ? '👁' : '🙈';
-      });
-    }
+    });
   },
 
 renderSeccion(s) {
@@ -5301,48 +5280,46 @@ renderSeccion(s) {
         return `
           ${dev ? `
           <label>URL del bot WhatsApp</label>
-<div class="usr-pin-row">
-  <input id="cfg-BB_API_URL" type="password" value="${v('BB_API_URL')}"
-         placeholder="https://app.heartsync.cloud/api/v2/..." autocomplete="off" spellcheck="false" />
-  <button type="button" id="cfg-bburl-toggle" class="usr-pin-toggle"
-          title="Mostrar / ocultar">👁</button>
-</div>
- <p class="muted" style="font-size:0.72rem;">
-            🔒 Secreto. Solo visible para DESARROLLADOR. Se usa en el header
-            <code>x-api-heartsync</code> al enviar mensajes.
-          </p>
+          <div class="cfg-secret-row">
+            <input id="cfg-BB_API_URL" type="password" value="${v('BB_API_URL')}" placeholder="https://app.builderbot.cloud/api/v2/..." autocomplete="off" spellcheck="false" />
+            <button type="button" class="cfg-secret-toggle" data-toggle="cfg-BB_API_URL">👁</button>
+          </div>
+          <p class="muted" style="font-size:0.72rem;">🔒 Secreto. Solo visible para DESARROLLADOR. Se usa en el header <code>x-api-heartsync</code> al enviar mensajes.</p>
 
           <label>API Key del bot (HeartSync)</label>
-          <div class="usr-pin-row">
-            <input id="cfg-BB_API_KEY" type="password" value="${v('BB_API_KEY')}"
-                   placeholder="bb-xxxxxxxx-..." autocomplete="off" spellcheck="false" />
-            <button type="button" id="cfg-bbkey-toggle" class="usr-pin-toggle"
-                    title="Mostrar / ocultar">👁</button>
+          <div class="cfg-secret-row">
+            <input id="cfg-BB_API_KEY" type="password" value="${v('BB_API_KEY')}" placeholder="bb-..." autocomplete="off" spellcheck="false" />
+            <button type="button" class="cfg-secret-toggle" data-toggle="cfg-BB_API_KEY">👁</button>
           </div>
-          <p class="muted" style="font-size:0.72rem;">
-            🔒 Secreto. Solo visible para DESARROLLADOR. Se usa en el header
-            <code>x-api-heartsync</code> al enviar mensajes.
-          </p>
+          <p class="muted" style="font-size:0.72rem;">🔒 Secreto. Solo visible para DESARROLLADOR. Se usa en el header <code>x-api-heartsync</code> al enviar mensajes.</p>
 
           <label>Endpoint base</label>
-          <input id="cfg-BB_ENDPOINT_BASE" type="text" value="${v('BB_ENDPOINT_BASE','https://app.builderbot.cloud')}" placeholder="https://app.builderbot.cloud" />
+          <div class="cfg-secret-row">
+            <input id="cfg-BB_ENDPOINT_BASE" type="password" value="${v('BB_ENDPOINT_BASE','https://app.builderbot.cloud')}" placeholder="https://app.builderbot.cloud" autocomplete="off" spellcheck="false" />
+            <button type="button" class="cfg-secret-toggle" data-toggle="cfg-BB_ENDPOINT_BASE">👁</button>
+          </div>
 
           <label>Bot ID (API v2)</label>
-          <input id="cfg-BB_BOT_ID" type="text" value="${v('BB_BOT_ID')}" placeholder="xxxxxxxx-xxxx-..." />
+          <div class="cfg-secret-row">
+            <input id="cfg-BB_BOT_ID" type="password" value="${v('BB_BOT_ID')}" placeholder="xxxxxxxx-xxxx-..." autocomplete="off" spellcheck="false" />
+            <button type="button" class="cfg-secret-toggle" data-toggle="cfg-BB_BOT_ID">👁</button>
+          </div>
 
           <label>Project ID (API v1 manager)</label>
-          <input id="cfg-BB_PROJECT_ID" type="text" value="${v('BB_PROJECT_ID')}" placeholder="xxxxxxxx-xxxx-..." />
+          <div class="cfg-secret-row">
+            <input id="cfg-BB_PROJECT_ID" type="password" value="${v('BB_PROJECT_ID')}" placeholder="xxxxxxxx-xxxx-..." autocomplete="off" spellcheck="false" />
+            <button type="button" class="cfg-secret-toggle" data-toggle="cfg-BB_PROJECT_ID">👁</button>
+          </div>
 
           <label>API Manager · general (bbc-…) — estado y QR</label>
-          <div class="usr-pin-row">
+          <div class="cfg-secret-row">
             <input id="cfg-BB_MANAGER_API" type="password" value="${v('BB_MANAGER_API')}" placeholder="bbc-..." autocomplete="off" spellcheck="false" />
-            <button type="button" id="cfg-bbmgr-toggle" class="usr-pin-toggle" title="Mostrar / ocultar">👁</button>
+            <button type="button" class="cfg-secret-toggle" data-toggle="cfg-BB_MANAGER_API">👁</button>
           </div>
           <p class="muted" style="font-size:0.72rem;">🔒 Secreto. Solo DESARROLLADOR. Se usa para consultar estado y generar el QR.</p>
 
           <label>Teléfono del dueño (recibe el resumen diario)</label>
-          <input id="cfg-WA_TELEFONO_DUENO" type="tel" inputmode="numeric" maxlength="10"
-                 value="${v('WA_TELEFONO_DUENO')}" placeholder="3001234567" />
+          <input id="cfg-WA_TELEFONO_DUENO" type="tel" inputmode="numeric" maxlength="10" value="${v('WA_TELEFONO_DUENO')}" placeholder="3001234567" />
           ` : ''}
 
           ${this.renderTemplate('WA_TEMPLATE_TICKET', 'Plantilla: ticket al cliente')}
