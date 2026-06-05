@@ -5294,3 +5294,25 @@ img.brand[alt="Banner"] {
 .res-modal-aprobar select {
   margin-top: 8px;
 }
+
+/* ============================================================ MI BOT ============================================================ */
+.bot-status { border-radius:var(--r-lg); padding:22px 18px; text-align:center; color:#fff; margin-top:14px; box-shadow:var(--sh-md); }
+.bot-status--online { background:linear-gradient(135deg,#22c55e,#16a34a); }
+.bot-status--scan   { background:linear-gradient(135deg,#fbbf24,#d97706); color:#422006; }
+.bot-status--offline{ background:linear-gradient(135deg,#ef4444,#b91c1c); }
+.bot-status--unknown{ background:linear-gradient(135deg,#94a3b8,#64748b); }
+.bot-status__icon { font-size:2.6rem; }
+.bot-status__txt { font-family:var(--font-display); font-weight:800; font-size:1.2rem; margin-top:4px; }
+.bot-status__sub { font-size:0.85rem; opacity:0.9; margin-top:2px; }
+.bot-section { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--r-lg); padding:16px; box-shadow:var(--sh-sm); margin-top:12px; }
+.bot-section__title { font-family:var(--font-display); font-weight:700; font-size:1rem; color:var(--primary); margin:0 0 10px; }
+.bot-btn-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.bot-action { display:flex; flex-direction:column; align-items:center; gap:6px; padding:16px 10px; border-radius:var(--r-md); border:1.5px solid var(--border-strong); background:var(--bg-card); font-weight:700; font-size:0.85rem; color:var(--text-soft); transition:all .15s; }
+.bot-action:hover { border-color:var(--primary); color:var(--primary); background:var(--primary-soft); }
+.bot-action__icon { font-size:1.5rem; }
+.bot-qr-img { width:230px; max-width:80vw; height:auto; margin:10px auto; border-radius:var(--r-md); border:4px solid var(--bg-soft); background:#fff; }
+.bot-qr-img--connected { filter:grayscale(.7) blur(3px); opacity:.35; transition:filter .6s ease, opacity .6s ease; }
+.bot-qr-ok { max-width:280px; margin:10px auto 4px; padding:12px 14px; border-radius:var(--r-md); background:linear-gradient(135deg,#22c55e,#16a34a); color:#fff; font-weight:700; font-size:0.92rem; text-align:center; box-shadow:var(--sh-sm); }
+.bot-qr-ok span { display:inline-block; margin-top:2px; font-weight:500; font-size:0.78rem; opacity:.92; }
+.bot-contacto-row { display:flex; gap:8px; margin-top:8px; }
+.bot-contacto-row input { flex:1; }
