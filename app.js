@@ -53,7 +53,8 @@ const ICONOS = {
   impresora:  'https://res.cloudinary.com/dqqeavica/image/upload/v1778186304/impresora_gkpbci.webp',
   excel:      'https://res.cloudinary.com/dqqeavica/image/upload/v1778186304/excel_rkcld6.webp',
   luna:       'https://res.cloudinary.com/dqqeavica/image/upload/v1778186305/luna_mfjvx6.webp',
-  mesero:     'https://res.cloudinary.com/dqqeavica/image/upload/v1778186305/mesero_fs2r5u.webp'
+  mesero:     'https://res.cloudinary.com/dqqeavica/image/upload/v1778186305/mesero_fs2r5u.webp',
+ bot:        'https://res.cloudinary.com/dqqeavica/image/upload/v1780053848/heartsync_ojmqxm.gif'
 };
 
 const PLACEHOLDER_PRODUCTO = 'https://res.cloudinary.com/dqqeavica/image/upload/v1778186302/plato_cmnvge.webp';
@@ -495,6 +496,7 @@ function procesarLoginExitoso(user) {
 }
 
 function logout() {
+   try { Bot.detenerPollingQR(); } catch (_) {}
   // Fase 5 / Bloque G — Desuscribir listener de config antes de cerrar
   try { Config.unsubscribeRTDB(); } catch (_) {}
   // Fase 7 / Bloque Q — Desuscribir listener de reservas (badge global)
@@ -665,6 +667,12 @@ function irAMenuRestaurante() {
       icono: ICONOS.impresora,
       roles: ['SUPERUSUARIO'],
       view: 'configuracion'
+    },
+     {
+      key: 'bot', titulo: 'Mi Bot', desc: 'Control de WhatsApp',
+      icono: ICONOS.bot,
+      roles: ['SUPERUSUARIO'],   // DESARROLLADOR ve todos los tiles igual
+      view: 'bot'
     }
   ];
 
@@ -714,6 +722,8 @@ function irAMenuRestaurante() {
         Balances.abrir();
       } else if (t.view === 'reservas') {
         Reservas.abrir();
+      } else if (t.view === 'bot') {
+        Bot.abrir();
       } else {
         showView(t.view);
       }
@@ -756,6 +766,7 @@ document.addEventListener('click', (e) => {
    if (typeof Auditoria !== 'undefined') Auditoria.desenganchar();
     if (typeof Balances !== 'undefined') Balances.desenganchar();
     if (typeof Reservas !== 'undefined') Reservas.desenganchar();
+   if (typeof Bot !== 'undefined') Bot.detenerPollingQR();
     if (dest === 'inicio') irAInicio();
     else if (dest === 'restaurante') irAMenuRestaurante();
     else showView(dest);
@@ -5158,6 +5169,16 @@ if (bbUrlToggle) {
     bbUrlToggle.textContent = inp.type === 'password' ? '👁' : '🙈';
   });
 }
+
+     const bbMgrToggle = $('#cfg-bbmgr-toggle');
+    if (bbMgrToggle) {
+      bbMgrToggle.addEventListener('click', () => {
+        const inp = $('#cfg-BB_MANAGER_API');
+        if (!inp) return;
+        inp.type = inp.type === 'password' ? 'text' : 'password';
+        bbMgrToggle.textContent = inp.type === 'password' ? '👁' : '🙈';
+      });
+    }
   },
 
 renderSeccion(s) {
@@ -5302,6 +5323,22 @@ renderSeccion(s) {
             🔒 Secreto. Solo visible para DESARROLLADOR. Se usa en el header
             <code>x-api-heartsync</code> al enviar mensajes.
           </p>
+
+          <label>Endpoint base</label>
+          <input id="cfg-BB_ENDPOINT_BASE" type="text" value="${v('BB_ENDPOINT_BASE','https://app.builderbot.cloud')}" placeholder="https://app.builderbot.cloud" />
+
+          <label>Bot ID (API v2)</label>
+          <input id="cfg-BB_BOT_ID" type="text" value="${v('BB_BOT_ID')}" placeholder="xxxxxxxx-xxxx-..." />
+
+          <label>Project ID (API v1 manager)</label>
+          <input id="cfg-BB_PROJECT_ID" type="text" value="${v('BB_PROJECT_ID')}" placeholder="xxxxxxxx-xxxx-..." />
+
+          <label>API Manager · general (bbc-…) — estado y QR</label>
+          <div class="usr-pin-row">
+            <input id="cfg-BB_MANAGER_API" type="password" value="${v('BB_MANAGER_API')}" placeholder="bbc-..." autocomplete="off" spellcheck="false" />
+            <button type="button" id="cfg-bbmgr-toggle" class="usr-pin-toggle" title="Mostrar / ocultar">👁</button>
+          </div>
+          <p class="muted" style="font-size:0.72rem;">🔒 Secreto. Solo DESARROLLADOR. Se usa para consultar estado y generar el QR.</p>
 
           <label>Teléfono del dueño (recibe el resumen diario)</label>
           <input id="cfg-WA_TELEFONO_DUENO" type="tel" inputmode="numeric" maxlength="10"
@@ -5455,7 +5492,8 @@ if (key === 'horario') {
                                 'RESTAURANTE_DIRECCION','RESTAURANTE_LOGO_URL','RESTAURANTE_TICKET_PIE'];
       case 'operacion': return ['CAJA_DESCUENTO_MAX_PCT','PROPINA_SUGERIDA_PCT'];
       case 'tiempos':   return ['COCINA_WARN_MIN','COCINA_LATE_MIN','CAJA_WARN_MIN','CAJA_LATE_MIN'];
-      case 'whatsapp':  return ['BB_API_URL','BB_API_KEY','WA_TELEFONO_DUENO',
+      case 'whatsapp':  return ['BB_API_URL','BB_API_KEY','BB_ENDPOINT_BASE','BB_BOT_ID',
+                                'BB_PROJECT_ID','BB_MANAGER_API','WA_TELEFONO_DUENO',
                                 'WA_TEMPLATE_TICKET','WA_TEMPLATE_PLATO_LISTO',
                                 'WA_TEMPLATE_CAJA_CUENTA','WA_TEMPLATE_CIERRE'];
       case 'horario':   return ['RESTAURANTE_HORA_APERTURA','RESTAURANTE_HORA_CIERRE'];
@@ -8047,6 +8085,149 @@ render() {
 };
 
 /* ============================================================
+   MI BOT (control WhatsApp)
+   ============================================================ */
+const Bot = {
+  silenciado:false, qrPoll:null,
+  // 👉 CAMBIA este link por el de TU proyecto en BuilderBot (link.bbot.site/<PROJECT_ID>)
+  panelUrl:'https://link.bbot.site/ff37a123-12b0-4fdc-9866-f3e2daf389fb',
+
+  async abrir(){ showView('bot'); this.render(); await this.refrescarEstado(); },
+  render(){
+    this.detenerPollingQR();
+    $('#bot-content').innerHTML=`
+      <div id="bot-status" class="bot-status bot-status--unknown">
+        <div class="bot-status__icon">⏳</div>
+        <div class="bot-status__txt">Consultando estado…</div>
+        <div class="bot-status__sub">Un momento por favor</div>
+      </div>
+      <div class="bot-section">
+        <h3 class="bot-section__title">📱 Conectar WhatsApp</h3>
+        <p class="muted">Si tu bot está desconectado, genera el código QR y escanéalo desde WhatsApp en tu teléfono.</p>
+        <button id="bot-qr-btn" class="btn btn-primary btn-block mt-sm">Mostrar código QR</button>
+        <div id="bot-qr-box" style="text-align:center"></div>
+      </div>
+      <div class="bot-section">
+        <h3 class="bot-section__title">🛠 Controles del bot</h3>
+        <div class="bot-btn-grid">
+          <button class="bot-action" id="bot-reboot"><span class="bot-action__icon">🔄</span>Reiniciar</button>
+          <button class="bot-action" id="bot-mute"><span class="bot-action__icon">🔇</span><span id="bot-mute-lbl">Silenciar</span></button>
+        </div>
+        <button class="bot-action" id="bot-logout" style="width:100%;margin-top:10px;flex-direction:row;justify-content:center;align-items:center;gap:10px;border-color:rgba(220,38,38,.30);color:#b91c1c"><span class="bot-action__icon">🗑️</span>Eliminar sesión</button>
+      </div>
+      <div class="bot-section">
+        <h3 class="bot-section__title">👤 Gestionar un contacto</h3>
+        <p class="muted">Escribe el número (con 57) para bloquearlo, desbloquearlo o limpiar su conversación.</p>
+        <div class="bot-contacto-row"><input id="bot-num" inputmode="numeric" placeholder="573001234567"/></div>
+        <div class="bot-btn-grid mt-sm">
+          <button class="bot-action" id="bot-block"><span class="bot-action__icon">🚫</span>Bloquear</button>
+          <button class="bot-action" id="bot-unblock"><span class="bot-action__icon">✅</span>Desbloquear</button>
+        </div>
+        <button class="bot-action" id="bot-clear" style="width:100%;margin-top:10px;flex-direction:row;justify-content:center;align-items:center;gap:10px"><span class="bot-action__icon">🧹</span>Limpiar conversación</button>
+      </div>`;
+    $('#bot-qr-btn').addEventListener('click',()=>this.mostrarQR());
+    $('#bot-reboot').addEventListener('click',()=>this.reiniciar());
+    $('#bot-mute').addEventListener('click',()=>this.toggleMute());
+    $('#bot-block').addEventListener('click',()=>this.contacto('botBloquear','Bloquear contacto'));
+    $('#bot-unblock').addEventListener('click',()=>this.contacto('botDesbloquear','Desbloquear contacto'));
+    $('#bot-clear').addEventListener('click',()=>this.contacto('botLimpiar','Limpiar conversación'));
+    $('#bot-logout').addEventListener('click',()=>this.eliminarSesion());
+  },
+  async refrescarEstado(){
+    const box=$('#bot-status'); if(!box) return;
+    try{
+      const r=await apiGet('botEstado');
+      const st=String(r.status||'UNKNOWN').toUpperCase();
+      if(st==='ONLINE'){ box.className='bot-status bot-status--online'; box.innerHTML='<div class="bot-status__icon">🟢</div><div class="bot-status__txt">Tu bot está conectado</div><div class="bot-status__sub">Funcionando correctamente</div>'; }
+      else if(st==='READY_TO_SCAN'){ box.className='bot-status bot-status--scan'; box.innerHTML='<div class="bot-status__icon">🟡</div><div class="bot-status__txt">Esperando que escanees el QR</div><div class="bot-status__sub">Genera el QR abajo y escanéalo</div>'; }
+      else if(st==='OFFLINE'||st==='FAILED'){ box.className='bot-status bot-status--offline'; box.innerHTML='<div class="bot-status__icon">🔴</div><div class="bot-status__txt">Tu bot está desconectado</div><div class="bot-status__sub">Genera el QR para reconectarlo</div>'; }
+      else { box.className='bot-status bot-status--unknown'; box.innerHTML=`<div class="bot-status__icon">⚪</div><div class="bot-status__txt">Estado: ${escapeHtml(st)}</div><div class="bot-status__sub">Toca actualizar para reintentar</div>`; }
+    }catch(e){ box.className='bot-status bot-status--unknown'; box.innerHTML=`<div class="bot-status__icon">⚪</div><div class="bot-status__txt">No se pudo consultar</div><div class="bot-status__sub">${escapeHtml(e.message)}</div>`; }
+  },
+  async mostrarQR(){
+    const boxQR=$('#bot-qr-box');
+    boxQR.innerHTML='<p class="muted">Generando código QR… (si el bot estaba apagado puede tardar unos segundos)</p>';
+    const panelUrl=this.panelUrl;
+    try{
+      const r=await apiGet('botQR');
+      const qr=r && r.qr ? String(r.qr) : '';
+      if(!qr){
+        boxQR.innerHTML=`<p class="muted">${escapeHtml((r&&r.error)||'No se recibió el QR. Toca de nuevo en unos segundos.')}</p>
+          <div class="bot-btn-grid">
+            <button class="bot-action" id="bot-qr-regen"><span class="bot-action__icon">🔄</span>Reintentar</button>
+            <a class="bot-action" href="${panelUrl}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit"><span class="bot-action__icon">🔗</span>Abrir en pestaña</a>
+          </div>`;
+        $('#bot-qr-regen')?.addEventListener('click',()=>this.mostrarQR()); return;
+      }
+      const src = qr.indexOf('data:')===0 ? qr : (/^https?:\/\//.test(qr) ? qr : 'data:image/png;base64,'+qr);
+      boxQR.innerHTML=`
+        <img class="bot-qr-img" src="${src}" alt="Código QR de WhatsApp"
+             onerror="this.replaceWith(document.createTextNode('No se pudo mostrar el QR. Toca Regenerar.'))"/>
+        <p class="muted">Escanéalo desde WhatsApp → <b>Dispositivos vinculados</b>. El código se renueva cada cierto tiempo.</p>
+        <div class="bot-btn-grid">
+          <button class="bot-action" id="bot-qr-regen"><span class="bot-action__icon">🔄</span>Regenerar QR</button>
+          <a class="bot-action" href="${panelUrl}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit"><span class="bot-action__icon">🔗</span>Abrir en pestaña</a>
+        </div>`;
+      $('#bot-qr-regen')?.addEventListener('click',()=>this.mostrarQR());
+      this.iniciarPollingQR();
+    }catch(e){ boxQR.innerHTML=`<p class="muted">Error al generar QR: ${escapeHtml(e.message)}</p>`; }
+  },
+  iniciarPollingQR(){
+    this.detenerPollingQR();
+    this.qrPoll=setInterval(async()=>{
+      const img=$('#bot-qr-box .bot-qr-img');
+      if(!img){ this.detenerPollingQR(); return; }
+      try{
+        await this.refrescarEstado();
+        if($('#bot-status')?.classList.contains('bot-status--online')){
+          this.detenerPollingQR(); img.classList.add('bot-qr-img--connected');
+          if(!$('#bot-qr-ok')){
+            const ok=document.createElement('div');
+            ok.id='bot-qr-ok'; ok.className='bot-qr-ok';
+            ok.innerHTML='🟢 <b>WhatsApp conectado</b><br><span>Ya puedes cerrar esta vista.</span>';
+            img.insertAdjacentElement('afterend', ok);
+          }
+        }
+      }catch(e){}
+    }, 60000);
+  },
+  detenerPollingQR(){ if(this.qrPoll){ clearInterval(this.qrPoll); this.qrPoll=null; } },
+  async reiniciar(){
+    const ok=await confirmar('Reiniciar bot','El bot se reiniciará. Puede tardar unos segundos en volver a conectarse. ¿Continuar?','Sí, reiniciar');
+    if(!ok) return; startLoading();
+    try{ const r=await apiPost('botReiniciar',withUser({})); stopLoading(); if(r.ok) alertOk('Bot reiniciado'); else alertWarn('Aviso','No se confirmó el reinicio.'); setTimeout(()=>this.refrescarEstado(),2000); }
+    catch(e){ stopLoading(); alertErr('Error',e.message); }
+  },
+  async toggleMute(){
+    const nuevo=!this.silenciado;
+    const ok=await confirmar(nuevo?'Silenciar bot':'Activar bot', nuevo?'El bot dejará de responder mensajes. ¿Continuar?':'El bot volverá a responder mensajes. ¿Continuar?','Sí');
+    if(!ok) return; startLoading();
+    try{ const r=await apiPost('botMute',withUser({flag:nuevo})); stopLoading();
+      if(r.ok){ this.silenciado=nuevo; $('#bot-mute-lbl').textContent=nuevo?'Activar':'Silenciar'; Toast&&Toast.fire({icon:'success',title:nuevo?'Bot silenciado':'Bot activado'}); }
+      else alertWarn('Aviso','No se confirmó el cambio.');
+    }catch(e){ stopLoading(); alertErr('Error',e.message); }
+  },
+  async contacto(action,titulo){
+    const num=$('#bot-num').value.trim().replace(/\D/g,'');
+    if(num.length<8) return alertWarn('Número inválido','Escribe un número válido con código de país (57).');
+    const ok=await confirmar(titulo, `Acción sobre el número <b>${num}</b>. ¿Continuar?`,'Sí');
+    if(!ok) return; startLoading();
+    try{ const r=await apiPost(action,withUser({numero:num})); stopLoading(); if(r.ok) alertOk('Listo'); else alertWarn('Aviso','No se confirmó la acción.'); }
+    catch(e){ stopLoading(); alertErr('Error',e.message); }
+  },
+  async eliminarSesion(){
+    const ok=await confirmar('Eliminar sesión','Esto cerrará la sesión de WhatsApp del bot y eliminará el despliegue actual.<br>Tendrás que generar un nuevo <b>código QR</b> y escanearlo para reconectarlo.<br><br>¿Deseas continuar?','Sí, eliminar sesión');
+    if(!ok) return; startLoading();
+    try{ const r=await apiPost('botEliminarSesion',withUser({})); stopLoading();
+      if(r.ok) alertOk('Sesión eliminada','El bot se desconectó. Genera un nuevo QR para volver a vincular WhatsApp.');
+      else alertWarn('Aviso','No se pudo confirmar la eliminación. Verifica el estado del bot.');
+      setTimeout(()=>this.refrescarEstado(),2000);
+    }catch(e){ stopLoading(); alertErr('Error',e.message); }
+  },
+  setupListeners(){ const r=$('#bot-refresh'); if(r) r.addEventListener('click',()=>this.refrescarEstado()); }
+};
+
+/* ============================================================
    INICIALIZACIÓN
    ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
@@ -8074,4 +8255,5 @@ window.addEventListener('DOMContentLoaded', () => {
   Balances.setupListeners();
 // Fase 7
   Reservas.setupListeners();
+   Bot.setupListeners();
 });
