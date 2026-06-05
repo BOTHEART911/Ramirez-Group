@@ -5316,3 +5316,15 @@ img.brand[alt="Banner"] {
 .bot-qr-ok span { display:inline-block; margin-top:2px; font-weight:500; font-size:0.78rem; opacity:.92; }
 .bot-contacto-row { display:flex; gap:8px; margin-top:8px; }
 .bot-contacto-row input { flex:1; }
+
+/* Campos secretos de Configuración (WhatsApp) — texto normal + mostrar/ocultar */
+.cfg-secret-row { position:relative; }
+.cfg-secret-row input { padding-right:44px; }   /* hereda el input normal: sin negrilla, sin letter-spacing */
+.cfg-secret-toggle {
+  position:absolute; top:50%; right:6px; transform:translateY(-50%);
+  width:34px; height:34px; border-radius:var(--r-sm);
+  background:var(--primary-soft); color:var(--primary);
+  display:inline-flex; align-items:center; justify-content:center;
+  font-size:1rem; transition:background .15s;
+}
+.cfg-secret-toggle:hover { background:var(--primary); color:#fff; }
