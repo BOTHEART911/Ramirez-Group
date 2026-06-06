@@ -5328,3 +5328,434 @@ img.brand[alt="Banner"] {
   font-size:1rem; transition:background .15s;
 }
 .cfg-secret-toggle:hover { background:var(--primary); color:#fff; }
+
+/* ============================================================
+   ============================================================
+   FASE 8 — VISTA CRÉDITOS
+   ============================================================
+   Pegar al final de styles.css. Reusa tokens existentes
+   (--primary, --accent, --ok, --warn, --error, radios, sombras).
+   ============================================================
+   ============================================================ */
+#view-creditos .container { padding-bottom: 100px; }
+
+/* Badge en el tile del menú (cuántos clientes con deuda) — opcional,
+   se activa solo si decides cablear el RTDB /creditos/resumen. Reusa
+   el patrón de .menu-tile__badge de reservas. */
+
+/* ── Hero: cartera total ─────────────────────────────────── */
+.cred-hero {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-2) 100%);
+  color: #fff;
+  border-radius: var(--r-lg);
+  padding: 18px 20px;
+  margin: 14px 0;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--sh-md);
+}
+.cred-hero::after {
+  content: '';
+  position: absolute;
+  top: -40%; right: -10%;
+  width: 200px; height: 200px;
+  background: radial-gradient(circle, var(--accent-light) 0%, transparent 70%);
+  opacity: 0.20;
+  pointer-events: none;
+}
+.cred-hero__main { position: relative; }
+.cred-hero__lbl {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  opacity: 0.82;
+}
+.cred-hero__val {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(1.8rem, 7vw, 2.4rem);
+  line-height: 1.1;
+  margin: 2px 0 12px;
+}
+.cred-hero__chips {
+  display: flex;
+  gap: 12px;
+  position: relative;
+  margin-bottom: 12px;
+}
+.cred-hero__chip {
+  background: rgba(255,255,255,0.12);
+  border-radius: var(--r-md);
+  padding: 8px 14px;
+  display: flex;
+  flex-direction: column;
+}
+.cred-hero__chip--alert { background: rgba(245, 158, 11, 0.30); }
+.cred-hero__chip-num {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.4rem;
+  line-height: 1;
+  color: var(--accent-light);
+}
+.cred-hero__chip--alert .cred-hero__chip-num { color: #fde68a; }
+.cred-hero__chip-lbl { font-size: 0.7rem; opacity: 0.85; margin-top: 2px; }
+.cred-hero__split {
+  position: relative;
+  border-top: 1px solid rgba(255,255,255,0.18);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cred-hero__split-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.84rem;
+  opacity: 0.92;
+}
+.cred-hero__split-row b { font-family: var(--font-display); font-weight: 800; }
+
+/* ── Lista de cartera ────────────────────────────────────── */
+.cred-content { display: flex; flex-direction: column; }
+.cred-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-top: 6px;
+}
+@media (min-width: 720px) {
+  .cred-list { grid-template-columns: repeat(2, 1fr); }
+}
+
+.cred-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left-width: 5px;
+  border-radius: var(--r-md);
+  padding: 14px;
+  box-shadow: var(--sh-sm);
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.15s;
+}
+.cred-card:hover { transform: translateY(-2px); box-shadow: var(--sh-md); }
+.cred-card--ok       { border-left-color: var(--ok); }
+.cred-card--warn     { border-left-color: var(--warn); }
+.cred-card--full     { border-left-color: var(--error); animation: credPulse 2.2s ease-in-out infinite; }
+.cred-card--sin-tope { border-left-color: var(--info); }
+@keyframes credPulse {
+  0%, 100% { box-shadow: var(--sh-sm); }
+  50%      { box-shadow: 0 0 0 3px rgba(220,38,38,0.16), var(--sh-md); }
+}
+
+.cred-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.cred-card__who { min-width: 0; flex: 1; }
+.cred-card__name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--primary);
+  margin: 0 0 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cred-card__sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cred-chip {
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  text-transform: uppercase;
+}
+.cred-chip--particular { background: var(--accent-soft); color: var(--accent); }
+.cred-chip--contrato   { background: var(--primary-soft); color: var(--primary); }
+.cred-card__tel { font-size: 0.74rem; color: var(--text-muted); font-weight: 600; }
+
+.cred-card__saldo { text-align: right; flex-shrink: 0; }
+.cred-card__saldo-lbl {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.cred-card__saldo-val {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.4rem;
+  line-height: 1;
+  color: var(--accent);
+}
+
+/* Barra de cupo */
+.cred-card__cupo { margin-top: 12px; }
+.cred-card__cupo-bar {
+  height: 8px;
+  background: var(--bg-soft);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.cred-card__cupo-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.35s ease-out;
+}
+.cred-card__cupo-fill--ok   { background: linear-gradient(90deg, #22c55e, var(--ok)); }
+.cred-card__cupo-fill--warn { background: linear-gradient(90deg, #fbbf24, var(--warn)); }
+.cred-card__cupo-fill--full { background: linear-gradient(90deg, #ef4444, var(--error)); }
+.cred-card__cupo-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-top: 4px;
+}
+.cred-card__cupo-meta--contrato {
+  margin-top: 10px;
+  font-style: italic;
+  color: var(--info);
+}
+
+.cred-card__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.cred-act {
+  flex: 1;
+  padding: 8px 6px;
+  border-radius: var(--r-sm);
+  font-weight: 700;
+  font-size: 0.8rem;
+  border: 1.5px solid transparent;
+  transition: background 0.15s, color 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+.cred-act:active { transform: scale(0.96); }
+.cred-act--wa {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: rgba(194,121,42,0.30);
+}
+.cred-act--wa:hover { background: var(--accent); color: #fff; }
+.cred-act--pago {
+  background: rgba(22,163,74,0.10);
+  color: var(--ok);
+  border-color: rgba(22,163,74,0.30);
+}
+.cred-act--pago:hover { background: var(--ok); color: #fff; }
+
+/* Toggle "con deuda" activo */
+#cred-toggle-deuda.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ── Modal de venta rápida ───────────────────────────────── */
+.cred-venta { text-align: left; }
+.cred-venta__hr { border: 0; border-top: 1px dashed var(--border); margin: 14px 0; }
+.cred-venta__tel-row { position: relative; }
+.cred-venta__tel-row input { padding-right: 40px; }
+
+.cred-venta__cliente-box { margin-top: 8px; }
+.cred-venta__cli {
+  background: var(--primary-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+}
+.cred-venta__cli-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--primary);
+}
+.cred-venta__cli-meta { font-size: 0.8rem; color: var(--text-soft); margin-top: 2px; }
+
+.cred-venta__nuevo {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--bg-soft);
+  border-radius: var(--r-md);
+}
+.cred-venta__tipo, .cred-venta__momento {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+.cred-venta__tipo-btn, .cred-venta__mom-btn {
+  padding: 10px 6px;
+  border-radius: var(--r-md);
+  border: 1.5px solid var(--border-strong);
+  background: var(--bg-card);
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--text-soft);
+  transition: all 0.15s;
+}
+.cred-venta__tipo-btn.is-active, .cred-venta__mom-btn.is-active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+  box-shadow: 0 3px 10px rgba(6,64,43,0.25);
+}
+
+.cred-venta__total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1.5px dashed var(--border-strong);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.cred-venta__total {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.5rem;
+  color: var(--accent);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.cred-venta__aviso {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: var(--r-sm);
+  font-size: 0.84rem;
+  font-weight: 600;
+  border: 1.5px solid;
+}
+.cred-venta__aviso--ok   { background: rgba(22,163,74,0.08); color: var(--ok); border-color: rgba(22,163,74,0.30); }
+.cred-venta__aviso--warn { background: rgba(245,158,11,0.10); color: #b45309; border-color: rgba(245,158,11,0.40); }
+.cred-venta__aviso--full { background: rgba(220,38,38,0.08); color: var(--error); border-color: rgba(220,38,38,0.40); }
+
+/* ── Modal de pago ───────────────────────────────────────── */
+.cred-pago { text-align: left; }
+.cred-pago__saldo {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  background: var(--bg-soft);
+  border-radius: var(--r-md);
+  padding: 10px 14px;
+  margin-bottom: 8px;
+}
+.cred-pago__saldo b {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.3rem;
+  color: var(--accent);
+}
+.cred-pago__metodos { grid-template-columns: 1fr 1fr; }
+
+/* ── Modal de detalle ────────────────────────────────────── */
+.cred-det { text-align: left; }
+.cred-det__head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border-radius: var(--r-md);
+  margin-bottom: 14px;
+  color: #fff;
+}
+.cred-det__head--ok       { background: linear-gradient(135deg, #22c55e, var(--ok)); }
+.cred-det__head--warn     { background: linear-gradient(135deg, #fbbf24, var(--warn)); color: #422006; }
+.cred-det__head--full     { background: linear-gradient(135deg, #ef4444, var(--error)); }
+.cred-det__head--sin-tope { background: linear-gradient(135deg, #3b82f6, var(--info)); }
+.cred-det__avatar {
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.22);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+.cred-det__head-body { min-width: 0; }
+.cred-det__name {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.15rem;
+  margin: 0 0 2px;
+  color: inherit !important;
+}
+.cred-det__head-meta { font-size: 0.82rem; opacity: 0.92; }
+
+.cred-det__cupo { margin-bottom: 14px; }
+
+.cred-det__acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.cred-det__acciones .btn { flex: 1; min-width: 130px; }
+
+.cred-det__block { margin-bottom: 16px; }
+.cred-det__block h4 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--primary);
+  margin: 0 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--border);
+}
+.cred-det__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.cred-det__row:last-child { border-bottom: 0; }
+.cred-det__row.is-pagado { opacity: 0.6; }
+.cred-det__row-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cred-det__row-fecha {
+  font-family: 'IBM Plex Mono', 'Courier New', monospace;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+.cred-det__row-desc { font-size: 0.88rem; color: var(--text-main); font-weight: 600; }
+.cred-det__row-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.cred-det__row-val {
+  font-family: var(--font-display);
+  font-weight: 800;
+  color: var(--primary);
+}
+.cred-det__row-val--abono { color: var(--ok); }
+.cred-det__row--abono { background: rgba(22,163,74,0.04); }
+.cred-det__badge {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  text-transform: uppercase;
+}
+.cred-det__badge--pagado  { background: rgba(22,163,74,0.12); color: var(--ok); }
+.cred-det__badge--parcial { background: rgba(245,158,11,0.14); color: #b45309; }
+.cred-det__badge--pend    { background: var(--primary-soft); color: var(--primary); }
