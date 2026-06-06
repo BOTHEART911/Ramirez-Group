@@ -1124,10 +1124,10 @@ const Catalogo = {
 
   abrirModalProducto(producto) {
     const isNew = !producto;
-    const p = producto || {
+   const p = producto || {
       id: '', categoriaId: this.data.categorias[0]?.id || '', nombre: '', descripcion: '',
       precioBase: 0, imagenUrl: '', tipo: 'PREPARACION', tiempoPrep: 15,
-      manejaStock: false, disponible: true, orden: 0
+      manejaStock: false, disponible: true, requiereNota: false, orden: 0
     };
     const mods = isNew ? [] : (this.data.modificadores[p.id] || []);
 
@@ -1190,6 +1190,11 @@ const Catalogo = {
         <label class="check-row">
           <input type="checkbox" id="m-disp" ${p.disponible ? 'checked' : ''} />
           <span>Disponible para vender</span>
+        </label>
+
+        <label class="check-row">
+          <input type="checkbox" id="m-nota-oblig" ${p.requiereNota ? 'checked' : ''} />
+          <span>Nota obligatoria al pedir (ej: ALMUERZO corriente)</span>
         </label>
 
         ${isNew ? `
@@ -1260,8 +1265,9 @@ const Catalogo = {
           precioBase: precio,
           tipo: $('#m-tipo').value,
           tiempoPrep: Number($('#m-tiempo').value) || 0,
-          manejaStock: $('#m-stock').checked,
+        manejaStock: $('#m-stock').checked,
           disponible: $('#m-disp').checked,
+          requiereNota: $('#m-nota-oblig').checked,
           imgBase64, imgFilename
         };
       }
@@ -1514,7 +1520,8 @@ const Catalogo = {
         tipo: datos.tipo,
         tiempoPrep: datos.tiempoPrep,
         manejaStock: datos.manejaStock,
-        disponible: datos.disponible
+        disponible: datos.disponible,
+        requiereNota: datos.requiereNota
       };
       if (imagenUrl) body.imagenUrl = imagenUrl;
       // Conservar URL existente si el usuario no cambió la foto
@@ -2593,8 +2600,8 @@ abrirModalProducto(producto, initial) {
 
           ${gruposHTML}
 
-          <label>Nota especial (opcional)</label>
-          <textarea id="mp-nota" placeholder="Ej: sin cebolla, punto medio…">${escapeHtml(notaIni)}</textarea>
+          <label>Nota especial ${producto.requiereNota ? '(requerida)' : '(opcional)'}</label>
+          <textarea id="mp-nota" placeholder="${producto.requiereNota ? 'Escribe el detalle del pedido…' : 'Ej: sin cebolla, punto medio…'}">${escapeHtml(notaIni)}</textarea>
 
           <div class="mp__total-row">
             <span>Total</span>
@@ -2676,10 +2683,15 @@ abrirModalProducto(producto, initial) {
             });
           });
         }
+       const notaVal = $('#mp-nota').value.trim();
+        if (producto.requiereNota && !notaVal) {
+          Swal.showValidationMessage('La nota es obligatoria para este producto');
+          return false;
+        }
         return {
           cantidad: Math.max(1, Number($('#mp-cantidad').value) || 1),
           modificadores: seleccion,
-          descripcion: $('#mp-nota').value.trim()
+          descripcion: notaVal
         };
       }
    }).then(async (res) => {
@@ -3127,7 +3139,7 @@ async cargarInicial() {
       `<li>${escapeHtml(m.nombreGrupo || m.grupo)}: <b>${escapeHtml(m.opcion)}</b></li>`
     ).join('');
     const desc = it.descripcion
-      ? `<div class="cmd-card__desc">📝 ${escapeHtml(it.descripcion)}</div>`
+      ? `<div class="cmd-card__desc ${it.requiereNota ? 'cmd-card__desc--destacada' : ''}">📝 ${escapeHtml(it.descripcion)}</div>`
       : '';
     const tmp = this.optimistas[it.id] ? 'is-tmp' : '';
 
