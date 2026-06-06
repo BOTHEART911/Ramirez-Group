@@ -4121,6 +4121,23 @@ const Anclaje = {
             `).join('')}
           </ol>
         </div>` : ''}
+
+      ${(p.propinasMeseros || []).length ? `
+        <div class="anc-card">
+          <h3 class="anc-card__title">🎁 Propinas por mesero</h3>
+          <ul class="anc-prop-list">
+            ${p.propinasMeseros.map(m => `
+              <li class="anc-prop-row">
+                <span class="anc-prop-row__name">${escapeHtml(String(m.nombre).split(' ').slice(0, 2).join(' '))}</span>
+                <span class="anc-prop-row__val">${fmtPesos(m.propinas)}</span>
+              </li>
+            `).join('')}
+            <li class="anc-prop-row anc-prop-row--total">
+              <span class="anc-prop-row__name">Total propinas</span>
+              <span class="anc-prop-row__val">${fmtPesos((p.propinaSistema || 0))}</span>
+            </li>
+          </ul>
+        </div>` : ''}
     `;
 
     const inpEf = $('#anc-ef');
