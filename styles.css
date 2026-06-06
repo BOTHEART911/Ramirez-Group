@@ -3161,6 +3161,32 @@ img.brand[alt="Banner"] {
   font-style: italic;
 }
 
+/* Ajuste 5 — Propinas por mesero en anclaje */
+.anc-prop-list { list-style: none; padding: 0; margin: 0; }
+.anc-prop-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 0.92rem;
+}
+.anc-prop-row:last-child { border-bottom: 0; }
+.anc-prop-row__name { color: var(--text-soft); font-weight: 600; }
+.anc-prop-row__val {
+  font-family: var(--font-display);
+  font-weight: 800;
+  color: var(--accent);
+}
+.anc-prop-row--total {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+  font-size: 1rem;
+}
+.anc-prop-row--total .anc-prop-row__name { color: var(--primary); font-weight: 800; }
+
 /* ============================================================
    ============================================================
    FASE 5 / BLOQUE E — VISTA USUARIOS
