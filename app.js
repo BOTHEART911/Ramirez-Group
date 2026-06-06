@@ -5190,8 +5190,9 @@ PREVIEW_DATA: {
     const fileLogo = $('#cfg-logo-file');
     if (fileLogo) fileLogo.addEventListener('change', () => this.subirLogo(fileLogo));
     // Preview plantillas
-   ['WA_TEMPLATE_TICKET','WA_TEMPLATE_PLATO_LISTO','WA_TEMPLATE_CAJA_CUENTA','WA_TEMPLATE_CIERRE',
-     'WA_TEMPLATE_RESERVA_CLIENTE','WA_TEMPLATE_RESERVA_GRUPO','WA_TEMPLATE_RESERVA_CONFIRMACION'].forEach(k => {
+  ['WA_TEMPLATE_TICKET','WA_TEMPLATE_PLATO_LISTO','WA_TEMPLATE_CAJA_CUENTA','WA_TEMPLATE_CIERRE',
+     'WA_TEMPLATE_RESERVA_CLIENTE','WA_TEMPLATE_RESERVA_GRUPO','WA_TEMPLATE_RESERVA_CONFIRMACION',
+     'WA_TEMPLATE_CREDITO_VENTA','WA_TEMPLATE_CREDITO_CUENTA','WA_TEMPLATE_CREDITO_PAGO'].forEach(k => {
       const ta = $('#cfg-' + k);
       if (ta) ta.addEventListener('input', () => this.actualizarPreview(k));
     });
