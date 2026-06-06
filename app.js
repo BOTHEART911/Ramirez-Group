@@ -8140,7 +8140,12 @@ const Creditos = {
   // Datos
   cartera: [],
   resumen: null,
+  clientes: [],          // lista completa (pestaña Clientes)
+  clientesResumen: null,
   cargando: false,
+
+  // Vista activa: 'cartera' (deudas) | 'clientes' (todos)
+  vistaActiva: 'cartera',
 
   // Filtros
   tipoFiltro: 'TODOS',      // TODOS | PARTICULAR | CONTRATO
@@ -8152,18 +8157,39 @@ const Creditos = {
     await this.cargar();
   },
 
+  // Conmuta entre Cartera y Clientes
+  cambiarVista(v) {
+    if (this.vistaActiva === v) return;
+    this.vistaActiva = v;
+    this.busqueda = '';
+    const inp = $('#cred-search-input');
+    if (inp) inp.value = '';
+    const bar = $('#cred-search-bar');
+    if (bar) bar.classList.add('hidden');
+    this.cargar();
+  },
+
   async cargar() {
     if (this.cargando) return;
     this.cargando = true;
     this.pintarLoading();
     try {
-      const r = await apiPost('creditoListarCartera', withUser({
-        soloConDeuda: this.soloConDeuda,
-        tipo:         this.tipoFiltro,
-        busqueda:     this.busqueda
-      }));
-      this.cartera = r.clientes || [];
-      this.resumen = r.resumen || null;
+      if (this.vistaActiva === 'clientes') {
+        const r = await apiPost('creditoListarClientes', withUser({
+          tipo:     this.tipoFiltro,
+          busqueda: this.busqueda
+        }));
+        this.clientes = r.clientes || [];
+        this.clientesResumen = { total: r.total || 0, conDeuda: r.conDeuda || 0 };
+      } else {
+        const r = await apiPost('creditoListarCartera', withUser({
+          soloConDeuda: this.soloConDeuda,
+          tipo:         this.tipoFiltro,
+          busqueda:     this.busqueda
+        }));
+        this.cartera = r.clientes || [];
+        this.resumen = r.resumen || null;
+      }
       this.render();
     } catch (e) {
       this.pintarError(e.message);
@@ -8180,7 +8206,7 @@ const Creditos = {
           <i></i><i></i><i></i><i></i><i></i><i></i>
           <i></i><i></i><i></i><i></i><i></i><i></i>
         </div>
-        <p class="muted">Cargando cartera…</p>
+        <p class="muted">Cargando…</p>
       </div>`;
   },
 
@@ -8196,9 +8222,25 @@ const Creditos = {
   },
 
   render() {
-    this.renderResumen();
+    this.actualizarToggleVista();
     this.actualizarChipsTipo();
-    this.renderLista();
+    if (this.vistaActiva === 'clientes') {
+      this.renderResumenClientes();
+      this.renderListaClientes();
+    } else {
+      this.renderResumen();
+      this.renderLista();
+    }
+  },
+
+  actualizarToggleVista() {
+    $$('[data-cred-vista]').forEach(b => {
+      b.classList.toggle('is-active', b.dataset.credVista === this.vistaActiva);
+    });
+    // El toggle "solo con deuda" solo tiene sentido en Cartera
+    const td = $('#cred-toggle-deuda');
+    if (td) td.style.display = (this.vistaActiva === 'cartera') ? '' : 'none';
+    // El FAB cambia de acción según la pestaña (lo lee al hacer click)
   },
 
   // ── Resumen hero (cartera total) ───────────────────────────
@@ -8325,6 +8367,191 @@ const Creditos = {
           <button class="cred-act cred-act--pago" data-cred-quick="pago" data-cred-id="${c.id}" title="Registrar pago/abono">💵 Registrar pago</button>
         </div>
       </article>`;
+  },
+
+  /* ────────────────────────────────────────────
+     PESTAÑA CLIENTES (todos, con o sin deuda)
+     ──────────────────────────────────────────── */
+  renderResumenClientes() {
+    const hero = $('#cred-hero');
+    if (!hero || !this.clientesResumen) return;
+    const r = this.clientesResumen;
+    hero.innerHTML = `
+      <div class="cred-hero__main">
+        <div class="cred-hero__lbl">Clientes de crédito</div>
+        <div class="cred-hero__val">${r.total}</div>
+      </div>
+      <div class="cred-hero__chips">
+        <div class="cred-hero__chip">
+          <span class="cred-hero__chip-num">${r.conDeuda}</span>
+          <span class="cred-hero__chip-lbl">con deuda</span>
+        </div>
+        <div class="cred-hero__chip">
+          <span class="cred-hero__chip-num">${r.total - r.conDeuda}</span>
+          <span class="cred-hero__chip-lbl">al día</span>
+        </div>
+      </div>
+    `;
+  },
+
+  renderListaClientes() {
+    const cont = $('#cred-content');
+    if (!cont) return;
+    if (!this.clientes.length) {
+      cont.innerHTML = `
+        <div class="card text-center" style="margin-top:20px;">
+          <div style="font-size:2.4rem; opacity:0.4;">👥</div>
+          <h3>${this.busqueda ? 'Sin resultados' : 'Sin clientes de crédito'}</h3>
+          <p class="muted">${this.busqueda
+            ? 'Nadie coincide con tu búsqueda.'
+            : 'Toca <b>+</b> para crear el primer cliente de crédito.'}</p>
+        </div>`;
+      return;
+    }
+    cont.innerHTML = `<div class="cred-list">${this.clientes.map(c => this.renderClienteCard(c)).join('')}</div>`;
+
+    $$('[data-cred-cli]', cont).forEach(el => {
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('[data-cli-quick]')) return;
+        const c = this.clientes.find(x => x.id === el.dataset.credCli);
+        if (c) this.abrirDetalle(c);
+      });
+    });
+    $$('[data-cli-quick="editar"]', cont).forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const c = this.clientes.find(x => x.id === b.dataset.cliId);
+        if (c) this.abrirAltaCliente(c);
+      });
+    });
+  },
+
+  renderClienteCard(c) {
+    const tipoChip = c.tipo === 'CONTRATO'
+      ? `<span class="cred-chip cred-chip--contrato">📄 Contrato</span>`
+      : `<span class="cred-chip cred-chip--particular">👤 Particular</span>`;
+    const cupoTxt = (c.tipo === 'PARTICULAR' && c.cupo > 0)
+      ? `Cupo ${fmtPesos(c.cupo)}` : 'Sin tope';
+    const saldoTxt = c.saldo > 0
+      ? `<span class="cred-cli__saldo cred-cli__saldo--${c.semaforo}">Debe ${fmtPesos(c.saldo)}</span>`
+      : `<span class="cred-cli__saldo cred-cli__saldo--ok">Al día</span>`;
+    return `
+      <article class="cred-card cred-card--${c.semaforo}" data-cred-cli="${c.id}">
+        <div class="cred-card__head">
+          <div class="cred-card__who">
+            <h4 class="cred-card__name">${escapeHtml(c.nombre)}</h4>
+            <div class="cred-card__sub">${tipoChip}<span class="cred-card__tel">📱 ${escapeHtml(this.fmtTel(c.telefono))}</span></div>
+          </div>
+          <button class="cred-cli__edit" data-cli-quick="editar" data-cli-id="${c.id}" title="Editar cliente">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </button>
+        </div>
+        <div class="cred-cli__foot">
+          <span class="cred-cli__cupo">${cupoTxt}</span>
+          ${saldoTxt}
+        </div>
+      </article>`;
+  },
+
+  /* ────────────────────────────────────────────
+     ALTA / EDICIÓN DE CLIENTE (independiente de la venta)
+     ──────────────────────────────────────────── */
+  abrirAltaCliente(cliente) {
+    const self = this;
+    const isNew = !cliente;
+    const c = cliente || { id: '', nombre: '', telefono: '', tipo: 'PARTICULAR', cupo: 0 };
+    const st = { tipo: String(c.tipo || 'PARTICULAR').toUpperCase() };
+
+    const html = `
+      <div class="cred-alta">
+        <label>Nombre</label>
+        <input type="text" id="ca-nombre" value="${escapeHtml(c.nombre)}" placeholder="Nombre del cliente" autocomplete="off" />
+
+        <label>Teléfono (WhatsApp)</label>
+        <input type="tel" id="ca-tel" maxlength="10" inputmode="numeric"
+               value="${escapeHtml(String(c.telefono || ''))}" placeholder="3001234567"
+               autocomplete="off" ${isNew ? '' : 'readonly'} />
+        ${isNew ? '' : '<p class="muted" style="font-size:0.72rem;margin:2px 0 0;">El teléfono no se cambia (es la llave del cliente).</p>'}
+
+        <label>Tipo de crédito</label>
+        <div class="cred-venta__tipo">
+          <button type="button" class="cred-venta__tipo-btn ${st.tipo==='PARTICULAR'?'is-active':''}" data-ca-tipo="PARTICULAR">👤 Particular</button>
+          <button type="button" class="cred-venta__tipo-btn ${st.tipo==='CONTRATO'?'is-active':''}" data-ca-tipo="CONTRATO">📄 Contrato</button>
+        </div>
+
+        <div id="ca-cupo-wrap" style="${st.tipo==='PARTICULAR'?'':'display:none;'}">
+          <label>Cupo de crédito (tope)</label>
+          <input type="text" id="ca-cupo" inputmode="numeric"
+                 value="${c.cupo ? Number(c.cupo).toLocaleString('es-CO') : ''}" placeholder="300.000" autocomplete="off" />
+        </div>
+      </div>`;
+
+    Swal.fire({
+      title: isNew ? 'Nuevo cliente de crédito' : 'Editar cliente',
+      html, width: 520,
+      showCancelButton: true,
+      confirmButtonText: isNew ? 'Crear cliente' : 'Guardar',
+      cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      focusConfirm: false,
+      didOpen: () => {
+        const fmtMoney = (el) => {
+          const n = Number(String(el.value).replace(/\D/g, '')) || 0;
+          el.value = n ? n.toLocaleString('es-CO') : '';
+        };
+        $('#ca-cupo')?.addEventListener('input', () => fmtMoney($('#ca-cupo')));
+        $('#ca-tel').addEventListener('input', () => {
+          $('#ca-tel').value = $('#ca-tel').value.replace(/\D/g, '').substring(0, 10);
+        });
+        $$('[data-ca-tipo]').forEach(b => {
+          b.addEventListener('click', () => {
+            st.tipo = b.dataset.caTipo;
+            $$('[data-ca-tipo]').forEach(x => x.classList.toggle('is-active', x === b));
+            const w = $('#ca-cupo-wrap');
+            if (w) w.style.display = (st.tipo === 'PARTICULAR') ? '' : 'none';
+          });
+        });
+      },
+      preConfirm: () => {
+        const nombre = $('#ca-nombre').value.trim();
+        if (nombre.length < 3) { Swal.showValidationMessage('Nombre requerido'); return false; }
+        const tel = $('#ca-tel').value.replace(/\D/g, '');
+        if (!/^3\d{9}$/.test(tel)) { Swal.showValidationMessage('Celular válido (10 dígitos, inicia en 3)'); return false; }
+        let cupo = 0;
+        if (st.tipo === 'PARTICULAR') {
+          cupo = Number(($('#ca-cupo').value || '').replace(/\D/g, '')) || 0;
+          if (!(cupo > 0)) { Swal.showValidationMessage('El particular requiere un cupo mayor a 0'); return false; }
+        }
+        return { nombre, telefono: tel, tipo: st.tipo, cupo };
+      }
+    }).then(async (res) => {
+      if (!res.isConfirmed) return;
+      startLoading();
+      try {
+        if (isNew) {
+          await apiPost('creditoAltaCliente', withUser({
+            nombre: res.value.nombre, telefono: res.value.telefono,
+            tipo: res.value.tipo, cupo: res.value.cupo
+          }));
+          Toast && Toast.fire({ icon: 'success', title: 'Cliente creado' });
+        } else {
+          await apiPost('creditoEditarCliente', withUser({
+            creditoClienteId: c.id,
+            nombre: res.value.nombre, tipo: res.value.tipo, cupo: res.value.cupo
+          }));
+          Toast && Toast.fire({ icon: 'success', title: 'Cliente actualizado' });
+        }
+        stopLoading();
+        self.cargar();
+      } catch (e) {
+        stopLoading();
+        // editar tipo/cupo requiere SUPER/ADMIN; CAJA solo crea
+        alertErr('Error', e.message);
+      }
+    });
   },
 
   /* ────────────────────────────────────────────
@@ -8686,6 +8913,356 @@ const Creditos = {
       alertErr('Error', e.message);
     }
   },
+
+  /* ────────────────────────────────────────────
+     DETALLE / HISTORIAL DEL CLIENTE
+     ──────────────────────────────────────────── */
+  async abrirDetalle(c) {
+    startLoading();
+    let data;
+    try {
+      data = await apiPost('creditoDetalleCliente', withUser({ creditoClienteId: c.id }));
+      stopLoading();
+    } catch (e) {
+      stopLoading();
+      return alertErr('Error', e.message);
+    }
+    const cli = data.cliente;
+    const self = this;
+
+    const cupoBloque = (cli.tipo === 'PARTICULAR' && cli.cupo > 0) ? `
+      <div class="cred-det__cupo">
+        <div class="cred-card__cupo-bar">
+          <div class="cred-card__cupo-fill cred-card__cupo-fill--${cli.semaforo}"
+               style="width:${Math.min(100, Math.round(cli.saldo / cli.cupo * 100))}%"></div>
+        </div>
+        <div class="cred-card__cupo-meta">
+          <span>Debe ${fmtPesos(cli.saldo)}</span>
+          <span>Cupo ${fmtPesos(cli.cupo)}</span>
+        </div>
+      </div>` : (cli.tipo === 'CONTRATO'
+        ? `<div class="cred-card__cupo-meta cred-card__cupo-meta--contrato">📄 Contrato · sin tope</div>` : '');
+
+    const filaCredito = (cr) => `
+      <div class="cred-det__row ${cr.estado === 'PAGADO' ? 'is-pagado' : ''}">
+        <div class="cred-det__row-main">
+          <span class="cred-det__row-fecha">${escapeHtml(this._fechaDmy(cr.fecha))}</span>
+          <span class="cred-det__row-desc">${cr.cantidad}× ${escapeHtml(cr.momento.charAt(0) + cr.momento.slice(1).toLowerCase())}</span>
+        </div>
+        <div class="cred-det__row-right">
+          <span class="cred-det__row-val">${fmtPesos(cr.total)}</span>
+          ${cr.estado === 'PAGADO'
+            ? `<span class="cred-det__badge cred-det__badge--pagado">Pagado</span>`
+            : (cr.abonado > 0
+                ? `<span class="cred-det__badge cred-det__badge--parcial">Abonado ${fmtPesos(cr.abonado)}</span>`
+                : `<span class="cred-det__badge cred-det__badge--pend">Pendiente</span>`)}
+        </div>
+      </div>`;
+
+    const filaAbono = (a) => `
+      <div class="cred-det__row cred-det__row--abono">
+        <div class="cred-det__row-main">
+          <span class="cred-det__row-fecha">${escapeHtml(this._fechaDmy(a.fecha, true))}</span>
+          <span class="cred-det__row-desc">💵 ${escapeHtml(a.metodo.charAt(0) + a.metodo.slice(1).toLowerCase())}${a.usuarioNombre ? ' · ' + escapeHtml(a.usuarioNombre.split(' ')[0]) : ''}</span>
+        </div>
+        <div class="cred-det__row-right">
+          <span class="cred-det__row-val cred-det__row-val--abono">+${fmtPesos(a.valor)}</span>
+        </div>
+      </div>`;
+
+    const html = `
+      <div class="cred-det">
+        <header class="cred-det__head cred-det__head--${cli.semaforo}">
+          <div class="cred-det__avatar">${escapeHtml(this.iniciales(cli.nombre))}</div>
+          <div class="cred-det__head-body">
+            <h3 class="cred-det__name">${escapeHtml(cli.nombre)}</h3>
+            <div class="cred-det__head-meta">
+              ${cli.tipo === 'CONTRATO' ? '📄 Contrato' : '👤 Particular'} · 📱 ${escapeHtml(this.fmtTel(cli.telefono))}
+            </div>
+          </div>
+        </header>
+
+        ${cupoBloque}
+
+        <div class="cred-det__acciones">
+          <button class="btn btn-accent btn-sm" data-det-acc="cuenta">📨 Enviar cuenta</button>
+          <button class="btn btn-success btn-sm" data-det-acc="pago">💵 Registrar pago</button>
+          ${cli.saldo > 0 ? `<button class="btn btn-primary btn-sm" data-det-acc="pagada">✓ Cuenta pagada</button>` : ''}
+          ${cli.tipo === 'PARTICULAR' ? `<button class="btn btn-ghost btn-sm" data-det-acc="extender">🎯 Extender cupo</button>` : ''}
+        </div>
+
+        <div class="cred-det__block">
+          <h4>📌 Pendientes (${data.pendientes.length})</h4>
+          ${data.pendientes.length
+            ? data.pendientes.map(filaCredito).join('')
+            : '<p class="muted" style="font-size:0.85rem;">Sin consumos pendientes.</p>'}
+        </div>
+
+        ${data.abonos.length ? `
+          <div class="cred-det__block">
+            <h4>💵 Abonos (${data.abonos.length})</h4>
+            ${data.abonos.map(filaAbono).join('')}
+          </div>` : ''}
+
+        ${data.historial.length ? `
+          <div class="cred-det__block">
+            <h4>📜 Historial pagado (${data.historial.length})</h4>
+            ${data.historial.map(filaCredito).join('')}
+          </div>` : ''}
+      </div>`;
+
+    Swal.fire({
+      html, width: 580,
+      showConfirmButton: false, showCloseButton: true,
+      didOpen: () => {
+        $$('[data-det-acc]').forEach(b => {
+          b.addEventListener('click', () => {
+            const acc = b.dataset.detAcc;
+            Swal.close();
+            setTimeout(() => {
+              if (acc === 'cuenta')        self.enviarCuenta(cli);
+              else if (acc === 'pago')     self.abrirModalPago(cli);
+              else if (acc === 'pagada')   self.cuentaPagada(cli);
+              else if (acc === 'extender') self.abrirExtenderCupo(cli);
+            }, 150);
+          });
+        });
+      }
+    });
+  },
+
+  /* ────────────────────────────────────────────
+     REGISTRAR PAGO / ABONO
+     ──────────────────────────────────────────── */
+  abrirModalPago(c) {
+    const self = this;
+    const st = { metodo: 'EFECTIVO' };
+    Swal.fire({
+      title: 'Registrar pago — ' + c.nombre.split(' ')[0],
+      html: `
+        <div class="cred-pago">
+          <div class="cred-pago__saldo">
+            <span>Deuda actual</span>
+            <b>${fmtPesos(c.saldo)}</b>
+          </div>
+          <label>Valor del abono</label>
+          <input type="text" id="cp-valor" inputmode="numeric"
+                 value="${(c.saldo).toLocaleString('es-CO')}" style="text-align:center;font-weight:700;font-size:1.1rem;" />
+          <p class="muted" style="font-size:0.74rem;margin:4px 0 0;">Puede ser parcial. Por defecto, el total.</p>
+
+          <label>Método</label>
+          <div class="cobro__metodos cred-pago__metodos">
+            <button type="button" class="cobro__metodo is-active" data-cp-met="EFECTIVO">💵 Efectivo</button>
+            <button type="button" class="cobro__metodo" data-cp-met="TRANSFERENCIA">📱 Transferencia</button>
+          </div>
+
+          <label class="check-row">
+            <input type="checkbox" id="cp-wa" />
+            <span>📲 Avisar al cliente por WhatsApp</span>
+          </label>
+        </div>`,
+      width: 480,
+      showCancelButton: true,
+      confirmButtonText: 'Registrar pago',
+      cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      focusConfirm: false,
+      didOpen: () => {
+        const el = $('#cp-valor');
+        el.addEventListener('input', () => {
+          let n = Number(el.value.replace(/\D/g, '')) || 0;
+          if (n > c.saldo) n = c.saldo;
+          el.value = n ? n.toLocaleString('es-CO') : '';
+        });
+        $$('[data-cp-met]').forEach(b => {
+          b.addEventListener('click', () => {
+            $$('[data-cp-met]').forEach(x => x.classList.remove('is-active'));
+            b.classList.add('is-active');
+            st.metodo = b.dataset.cpMet;
+          });
+        });
+      },
+      preConfirm: () => {
+        const v = Number($('#cp-valor').value.replace(/\D/g, '')) || 0;
+        if (!(v > 0)) { Swal.showValidationMessage('Ingresa el valor del abono'); return false; }
+        return { valor: v, metodo: st.metodo, enviarWa: $('#cp-wa').checked };
+      }
+    }).then(async (res) => {
+      if (!res.isConfirmed) return;
+      startLoading();
+      try {
+        const r = await apiPost('creditoRegistrarPago', withUser({
+          creditoClienteId: c.id,
+          valor:  res.value.valor,
+          metodo: res.value.metodo,
+          enviarWa: res.value.enviarWa
+        }));
+        stopLoading();
+        Toast && Toast.fire({ icon: 'success', title: 'Pago registrado · saldo ' + fmtPesos(r.saldoNuevo) });
+        self.cargar();
+      } catch (e) {
+        stopLoading();
+        alertErr('Error', e.message);
+      }
+    });
+  },
+
+  async cuentaPagada(c) {
+    const r = await Swal.fire({
+      icon: 'question',
+      title: '¿Liquidar toda la cuenta?',
+      html: `Se registrará el pago completo de <b>${fmtPesos(c.saldo)}</b> y pasará al historial.`,
+      input: 'radio',
+      inputOptions: { EFECTIVO: '💵 Efectivo', TRANSFERENCIA: '📱 Transferencia' },
+      inputValue: 'EFECTIVO',
+      showCancelButton: true,
+      confirmButtonText: 'Sí, cuenta pagada',
+      cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      inputValidator: (v) => !v && 'Selecciona el método de pago'
+    });
+    if (!r.isConfirmed) return;
+    startLoading();
+    try {
+      await apiPost('creditoCuentaPagada', withUser({ creditoClienteId: c.id, metodo: r.value }));
+      stopLoading();
+      Toast && Toast.fire({ icon: 'success', title: 'Cuenta pagada · al historial' });
+      this.cargar();
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  async abrirExtenderCupo(c) {
+    const r = await Swal.fire({
+      title: 'Extender cupo',
+      html: `
+        <p class="muted" style="font-size:0.85rem;margin:0 0 10px;">
+          Cupo actual: <b>${fmtPesos(c.cupo)}</b> · Debe: <b>${fmtPesos(c.saldo)}</b></p>
+        <label style="text-align:left;">Nuevo cupo</label>
+        <input id="ce-cupo" inputmode="numeric" value="${(c.cupo).toLocaleString('es-CO')}"
+               style="text-align:center;font-weight:700;" />`,
+      showCancelButton: true,
+      confirmButtonText: 'Guardar',
+      cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      didOpen: () => {
+        const el = document.getElementById('ce-cupo');
+        el.addEventListener('input', () => {
+          const n = Number(el.value.replace(/\D/g, '')) || 0;
+          el.value = n ? n.toLocaleString('es-CO') : '';
+        });
+      },
+      preConfirm: () => {
+        const n = Number(document.getElementById('ce-cupo').value.replace(/\D/g, '')) || 0;
+        if (!(n > 0)) { Swal.showValidationMessage('El cupo debe ser mayor a 0'); return false; }
+        return n;
+      }
+    });
+    if (!r.isConfirmed) return;
+    startLoading();
+    try {
+      await apiPost('creditoExtenderCupo', withUser({ creditoClienteId: c.id, nuevoCupo: r.value }));
+      stopLoading();
+      Toast && Toast.fire({ icon: 'success', title: 'Cupo actualizado' });
+      this.cargar();
+    } catch (e) {
+      stopLoading();
+      alertErr('Error', e.message);
+    }
+  },
+
+  async enviarCuenta(c) {
+    startLoading();
+    try {
+      await apiPost('creditoEnviarCuenta', withUser({ creditoClienteId: c.id }));
+      stopLoading();
+      Toast && Toast.fire({ icon: 'success', title: 'Cuenta enviada por WhatsApp' });
+    } catch (e) {
+      stopLoading();
+      alertErr('No se pudo enviar', e.message);
+    }
+  },
+
+  /* ── Helpers ── */
+  // dd/mm/yyyy desde "yyyy-MM-dd" o "yyyy-MM-dd HH:mm[:ss]". conHora conserva HH:mm.
+  _fechaDmy(valor, conHora) {
+    const s = String(valor || '');
+    const iso = s.substring(0, 10);
+    if (iso.length !== 10 || iso.charAt(4) !== '-') return s;
+    const dmy = iso.substring(8, 10) + '/' + iso.substring(5, 7) + '/' + iso.substring(0, 4);
+    if (conHora) {
+      const hora = s.substring(11, 16);
+      if (/^\d{2}:\d{2}$/.test(hora)) return dmy + ' ' + hora;
+    }
+    return dmy;
+  },
+  iniciales(nombre) {
+    const p = String(nombre || '?').trim().split(/\s+/);
+    if (!p.length || !p[0]) return '?';
+    if (p.length === 1) return p[0].charAt(0).toUpperCase();
+    return (p[0].charAt(0) + p[1].charAt(0)).toUpperCase();
+  },
+  fmtTel(t) {
+    const s = String(t || '').replace(/\D/g, '');
+    if (s.length !== 10) return s;
+    return s.slice(0, 3) + ' ' + s.slice(3, 6) + ' ' + s.slice(6);
+  },
+
+  desenganchar() { /* sin listeners persistentes */ },
+
+  setupListeners() {
+    const fab = $('#cred-fab');
+    if (fab && !fab._bound) {
+      // El FAB cambia de acción según la pestaña:
+      //  - Cartera  → nueva venta a crédito
+      //  - Clientes → nuevo cliente de crédito
+      fab.addEventListener('click', () => {
+        if (this.vistaActiva === 'clientes') this.abrirAltaCliente(null);
+        else this.abrirVenta();
+      });
+      fab._bound = true;
+    }
+    // Toggle Cartera / Clientes
+    $$('[data-cred-vista]').forEach(b => {
+      if (b._bound) return;
+      b._bound = true;
+      b.addEventListener('click', () => this.cambiarVista(b.dataset.credVista));
+    });
+    const btn = $('#cred-search-btn');
+    const bar = $('#cred-search-bar');
+    const inp = $('#cred-search-input');
+    if (btn && !btn._bound) {
+      btn.addEventListener('click', () => {
+        bar.classList.toggle('hidden');
+        if (!bar.classList.contains('hidden')) inp.focus();
+        else { inp.value = ''; this.busqueda = ''; this.cargar(); }
+      });
+      btn._bound = true;
+    }
+    if (inp && !inp._bound) {
+      let t = null;
+      inp.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(() => { this.busqueda = inp.value.trim(); this.cargar(); }, 300);
+      });
+      inp._bound = true;
+    }
+    // Chips de tipo
+    $$('[data-cred-tipo]').forEach(c => {
+      if (c._bound) return;
+      c._bound = true;
+      c.addEventListener('click', () => { this.tipoFiltro = c.dataset.credTipo; this.cargar(); });
+    });
+    // Toggle solo-con-deuda
+    const td = $('#cred-toggle-deuda');
+    if (td && !td._bound) {
+      td._bound = true;
+      td.addEventListener('click', () => { this.soloConDeuda = !this.soloConDeuda; this.cargar(); });
+    }
+  }
+};
 
   /* ────────────────────────────────────────────
      DETALLE / HISTORIAL DEL CLIENTE
