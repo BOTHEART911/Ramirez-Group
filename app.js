@@ -7058,7 +7058,7 @@ const Balances = {
     });
   },
 
-  abrirDetalleMesero(m) {
+ abrirDetalleMesero(m) {
     const totalVentas = this.data.actual.totalVentas || 0;
     const pct = totalVentas > 0 ? Math.round(m.ventas / totalVentas * 100) : 0;
     const ini = this.iniciales(m.nombre);
@@ -7088,13 +7088,6 @@ const Balances = {
               <div class="bal-kpi__lbl">Pedidos</div>
             </div>
             <div class="bal-kpi">
-              <div class="bal-kpi__val">${fmtPesos(m.ticketPromedio)}</div>
-              <div class="bal-kpi__lbl">Ticket prom.</div>
-            </div>
-          </div>
-        </div>`,
-      width: 480,
-       <div class="bal-kpi">
               <div class="bal-kpi__val">${fmtPesos(m.ticketPromedio)}</div>
               <div class="bal-kpi__lbl">Ticket prom.</div>
             </div>
