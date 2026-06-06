@@ -7093,7 +7093,8 @@ const Balances = {
             </div>
           </div>
         </div>`,
-      width: 480,<div class="bal-kpi">
+      width: 480,
+       <div class="bal-kpi">
               <div class="bal-kpi__val">${fmtPesos(m.ticketPromedio)}</div>
               <div class="bal-kpi__lbl">Ticket prom.</div>
             </div>
