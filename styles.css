@@ -5759,3 +5759,47 @@ img.brand[alt="Banner"] {
 .cred-det__badge--pagado  { background: rgba(22,163,74,0.12); color: var(--ok); }
 .cred-det__badge--parcial { background: rgba(245,158,11,0.14); color: #b45309; }
 .cred-det__badge--pend    { background: var(--primary-soft); color: var(--primary); }
+
+.cred-vista-toggle { margin: 4px 0 10px; }
+ 
+.cred-cli__edit {
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.cred-cli__edit:hover { background: var(--primary); color: #fff; }
+ 
+.cred-cli__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.cred-cli__cupo {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+.cred-cli__saldo {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 0.92rem;
+  padding: 3px 12px;
+  border-radius: var(--r-pill);
+}
+.cred-cli__saldo--ok   { background: rgba(22,163,74,0.10); color: var(--ok); }
+.cred-cli__saldo--warn { background: rgba(245,158,11,0.14); color: #b45309; }
+.cred-cli__saldo--full { background: rgba(220,38,38,0.10); color: var(--error); }
+.cred-cli__saldo--sin-tope { background: var(--primary-soft); color: var(--primary); }
+ 
+.cred-alta { text-align: left; }
+.cred-alta .cred-venta__tipo { margin-top: 4px; }
