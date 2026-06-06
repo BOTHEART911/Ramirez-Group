@@ -3436,8 +3436,11 @@ tickEsperas() {
     // Fase 5 / Bloque G — propina sugerida (informativa, no se cobra)
       propinaSugeridaPct: propinaPct,
       propinaSugerida:    Math.round(totalNum * propinaPct / 100),
-      // Cambio 2 — propina opcional (check) + observación
+     // Cambio 2 — propina opcional (check) + observación
       propinaIncluida:    false,
+      // Ajuste 3 — valor editable de la propina (arranca en la sugerida)
+      propinaValor:       Math.round(totalNum * propinaPct / 100),
+      propinaTocada:      false,   // true si el cajero editó el monto a mano
       observaciones:      ''
     };
     st.descuentoMaxPct = this.config.descuentoMaxPct;
@@ -3504,7 +3507,7 @@ htmlModalCobro(p, st) {
             <input type="number" id="cb-desc" min="0" max="${st.descuentoMaxPct}" step="1" value="0" />
             <span id="cb-desc-val">$ 0</span>
           </div>
-          <div class="cobro__row cobro__row--total">
+         <div class="cobro__row cobro__row--total">
           <span>TOTAL</span>
           <span id="cb-total">${fmtPesos(st.total)}</span>
         </div>
@@ -3513,6 +3516,16 @@ htmlModalCobro(p, st) {
           <span>💡 Incluir propina sugerida (${st.propinaSugeridaPct}%):
             <b id="cb-propina-val">${fmtPesos(st.propinaSugerida)}</b></span>
         </label>
+        <div class="cobro__row cobro__row--virtual hidden" id="cb-virtual-row">
+          <span>TOTAL CON PROPINA</span>
+          <span id="cb-total-virtual">${fmtPesos(st.total + st.propinaSugerida)}</span>
+        </div>
+      </div>
+
+      <div id="cb-propina-input-row" class="cobro__propina-input hidden">
+        <label>Valor de la propina (editable)</label>
+        <input type="number" id="cb-propina-monto" min="0" step="500"
+               value="${st.propinaSugerida}" inputmode="numeric" />
       </div>
 
       <label>Método de pago</label>
@@ -3685,10 +3698,12 @@ bindModalCobro(p, st) {
  st.descuentoPct   = pct;
       st.descuentoValor = Math.round(st.subtotal * pct / 100);
       st.total          = st.subtotal - st.descuentoValor;
-      // Fase 5 / Bloque G — recalcular propina sugerida sobre el nuevo total
+     // Fase 5 / Bloque G — recalcular propina sugerida sobre el nuevo total
       st.propinaSugerida = Math.round(st.total * st.propinaSugeridaPct / 100);
       const propVal = $('#cb-propina-val');
       if (propVal) propVal.textContent = fmtPesos(st.propinaSugerida);
+      // Ajuste 3 — re-sincronizar la propina/virtual con el nuevo total
+      if (typeof self._reSyncPropina === 'function') self._reSyncPropina();
       upd();
     });
 
@@ -3720,10 +3735,50 @@ bindModalCobro(p, st) {
       } catch (err) { alertErr('Error', err.message); }
     });
 
-// Cambio 2 — Check propina (no se suma al total; solo se registra)
-    const chkProp = $('#cb-propina-chk');
+// Ajuste 3 — Propina: check + total virtual + monto editable.
+    // La propina NO se suma al total real; solo se muestra el "virtual"
+    // (total + propina) para que caja le diga al cliente cuánto pagaría
+    // con propina. Lo que se cobra/guarda como TOTAL sigue siendo el real.
+    const chkProp   = $('#cb-propina-chk');
+    const virtRow   = $('#cb-virtual-row');
+    const virtVal   = $('#cb-total-virtual');
+    const propRow   = $('#cb-propina-input-row');
+    const propMonto = $('#cb-propina-monto');
+
+    const repintarVirtual = () => {
+      if (virtVal) virtVal.textContent = fmtPesos(st.total + (Number(st.propinaValor) || 0));
+    };
+    // Expuesto para que el handler de descuento lo reutilice
+    self._reSyncPropina = () => {
+      if (!st.propinaTocada) {
+        st.propinaValor = st.propinaSugerida;
+        if (propMonto) propMonto.value = st.propinaSugerida;
+      }
+      repintarVirtual();
+    };
+
     if (chkProp) {
-      chkProp.addEventListener('change', () => { st.propinaIncluida = chkProp.checked; });
+      chkProp.addEventListener('change', () => {
+        st.propinaIncluida = chkProp.checked;
+        virtRow && virtRow.classList.toggle('hidden', !chkProp.checked);
+        propRow && propRow.classList.toggle('hidden', !chkProp.checked);
+        if (chkProp.checked) {
+          // Al activar, si no la han tocado, parte de la sugerida
+          if (!st.propinaTocada) {
+            st.propinaValor = st.propinaSugerida;
+            if (propMonto) propMonto.value = st.propinaSugerida;
+          }
+          repintarVirtual();
+        }
+      });
+    }
+    if (propMonto) {
+      propMonto.addEventListener('input', () => {
+        const v = Math.max(0, Number(propMonto.value) || 0);
+        st.propinaValor  = v;
+        st.propinaTocada = true;
+        repintarVirtual();
+      });
     }
 
     // Cambio 2 — Observación opcional
@@ -3794,8 +3849,8 @@ bindModalCobro(p, st) {
       esGenerico:       st.esGenerico,
       clienteNombre:    st.clienteNombre,
       clienteTelefono:  st.clienteTelefono,
-      // Cambio 2 — propina (solo si el check está activo) + observación
-      propina:          st.propinaIncluida ? (Number(st.propinaSugerida) || 0) : 0,
+      // Ajuste 3 — propina editable (solo si el check está activo) + observación
+      propina:          st.propinaIncluida ? Math.max(0, Number(st.propinaValor) || 0) : 0,
       observaciones:    st.observaciones || ''
     };
   },
