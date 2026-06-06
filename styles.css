@@ -4352,6 +4352,42 @@ img.brand[alt="Banner"] {
 }
 .bal-chart__hint b { color: var(--primary); }
 
+/* Barras de ventas por día — versión HTML legible (reemplaza el SVG estirado) */
+.bal-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 150px;
+  margin-top: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+.bal-bar2 {
+  flex: 1 1 0;
+  min-width: 28px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.bal-bar2__track { flex: 1; width: 72%; display: flex; align-items: flex-end; min-height: 0; }
+.bal-bar2__fill {
+  width: 100%;
+  min-height: 2px;
+  border-radius: 5px 5px 0 0;
+  background: linear-gradient(180deg, var(--primary-light), var(--primary));
+  transition: height 0.35s ease-out;
+}
+.bal-bar2--best .bal-bar2__fill { background: linear-gradient(180deg, var(--accent-light), var(--accent)); }
+.bal-bar2__lbl {
+  margin-top: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 /* Rank list (productos + categorías) */
 .bal-rank-list {
   display: flex;
