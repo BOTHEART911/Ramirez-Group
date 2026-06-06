@@ -706,6 +706,57 @@
   </section>
 
   <!-- ============================================================
+       VISTA CRÉDITOS  (Fase 8)
+       ============================================================ -->
+  <section id="view-creditos" class="view">
+    <header class="app-header">
+      <button class="app-header__back" data-go="restaurante" title="Volver">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"/>
+          <polyline points="12 19 5 12 12 5"/>
+        </svg>
+      </button>
+      <h1 class="app-header__title">Créditos</h1>
+      <button id="cred-search-btn" class="app-header__icon" title="Buscar">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="7"/>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+      </button>
+    </header>
+    <div class="container">
+      <div id="cred-search-bar" class="search-bar hidden">
+        <input id="cred-search-input" type="search"
+               placeholder="Buscar por nombre o teléfono…" autocomplete="off" />
+      </div>
+ 
+      <!-- Hero: cartera total -->
+      <div id="cred-hero" class="cred-hero"></div>
+ 
+      <!-- Chips de filtro -->
+      <div class="aud-chips" id="cred-chips">
+        <button class="aud-chip is-active" data-cred-tipo="TODOS">Todos</button>
+        <button class="aud-chip" data-cred-tipo="PARTICULAR">👤 Particulares</button>
+        <button class="aud-chip" data-cred-tipo="CONTRATO">📄 Contratos</button>
+        <button class="aud-chip" id="cred-toggle-deuda" title="Mostrar solo con deuda">💰 Con deuda</button>
+      </div>
+ 
+      <!-- Cuerpo dinámico -->
+      <div id="cred-content" class="cred-content"></div>
+    </div>
+ 
+    <button id="cred-fab" class="fab" title="Nueva venta a crédito">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"/>
+        <line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+    </button>
+  </section>
+
+  <!-- ============================================================
        VISTA MI BOT (Fase 8 / portada de IPS Vascular)
        ============================================================ -->
   <section id="view-bot" class="view">
