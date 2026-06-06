@@ -2614,6 +2614,27 @@ img.brand[alt="Banner"] {
   color: var(--primary);
 }
 
+/* Ajuste 3 — Total virtual con propina + campo editable */
+.cobro__row--virtual {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--accent);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.05rem;
+  color: var(--accent);
+}
+.cobro__row--virtual > span:last-child { color: var(--accent); }
+.cobro__propina-input {
+  margin: 4px 0 14px;
+  padding: 10px 12px;
+  background: var(--accent-soft);
+  border: 1px dashed var(--accent);
+  border-radius: var(--r-md);
+}
+.cobro__propina-input label { margin-top: 0; }
+.cobro__propina-input input { margin: 4px 0 0; font-weight: 700; text-align: center; }
+
 /* ============================================================
    ============================================================
    FASE 4 — Bloque Cliente en modal de cobro
