@@ -6721,7 +6721,7 @@ const Balances = {
                 </div>
                 <div class="bal-mesero__body">
                   <div class="bal-mesero__name">${escapeHtml(m.nombre)}</div>
-                  <div class="bal-mesero__meta">${m.pedidos} ped · ticket ${fmtPesos(m.ticketPromedio)}</div>
+                <div class="bal-mesero__meta">${m.pedidos} ped · ticket ${fmtPesos(m.ticketPromedio)}${(m.propinas || 0) > 0 ? ' · 🎁 ' + fmtPesos(m.propinas) : ''}</div>
                 </div>
                 <div class="bal-mesero__ventas">${fmtPesos(m.ventas)}</div>
               </div>`;
@@ -7073,6 +7073,16 @@ const Balances = {
             <div class="bal-kpi">
               <div class="bal-kpi__val">${fmtPesos(m.ticketPromedio)}</div>
               <div class="bal-kpi__lbl">Ticket prom.</div>
+            </div>
+          </div>
+        </div>`,
+      width: 480,<div class="bal-kpi">
+              <div class="bal-kpi__val">${fmtPesos(m.ticketPromedio)}</div>
+              <div class="bal-kpi__lbl">Ticket prom.</div>
+            </div>
+            <div class="bal-kpi">
+              <div class="bal-kpi__val">${fmtPesos(m.propinas || 0)}</div>
+              <div class="bal-kpi__lbl">🎁 Propinas</div>
             </div>
           </div>
         </div>`,
