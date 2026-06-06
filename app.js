@@ -6616,45 +6616,28 @@ const Balances = {
     return `<div class="bal-delta-mini bal-delta-mini--${cls}">${arrow} ${display}</div>`;
   },
 
-  // ── Render: Ventas por día (bar chart SVG) ─────────────────────
+  // ── Render: Ventas por día (barras HTML legibles) ──────────────
   renderVentasPorDia() {
     const serie = this.data.actual.serieVentas || [];
     if (!serie.length) return '';
     const max = Math.max(...serie.map(d => d.ventas), 1);
     const mejor = this.data.actual.mejorDia;
 
-    const barW = 100 / serie.length;
-    const barras = serie.map((d, i) => {
-      const h = (d.ventas / max) * 100;
-      const x = i * barW;
+    const barras = serie.map(d => {
+      const h = Math.max(2, Math.round((d.ventas / max) * 100));
       const esBest = mejor && d.fecha === mejor.fecha;
-      const cls = esBest ? 'bal-bar--best' : '';
       return `
-        <g class="bal-bar ${cls}" data-bal-day="${d.fecha}">
-          <rect x="${x + barW * 0.15}" y="${100 - h}"
-                width="${barW * 0.7}" height="${h}"
-                rx="2" ry="2" />
-          <title>${escapeHtml(this.diaCortoConFecha(d.fecha))}: ${fmtPesos(d.ventas)} · ${d.pedidos} ped</title>
-        </g>`;
-    }).join('');
-
-    const labels = serie.map((d, i) => {
-      const x = i * barW + barW / 2;
-      const lbl = this.diaCorto(d.fecha);
-      return `<text x="${x}" y="14" text-anchor="middle" class="bal-bar-lbl">${lbl}</text>`;
+        <div class="bal-bar2 ${esBest ? 'bal-bar2--best' : ''}"
+             title="${escapeHtml(this.diaCortoConFecha(d.fecha))}: ${fmtPesos(d.ventas)} · ${d.pedidos} ped">
+          <div class="bal-bar2__track"><div class="bal-bar2__fill" style="height:${h}%"></div></div>
+          <div class="bal-bar2__lbl">${this.diaCorto(d.fecha)}</div>
+        </div>`;
     }).join('');
 
     return `
       <section class="bal-section">
         <h3 class="bal-section__title">📈 Ventas por día</h3>
-        <div class="bal-chart-wrap">
-          <svg class="bal-chart" viewBox="0 0 100 110" preserveAspectRatio="none">
-            <g transform="translate(0, 0)">${barras}</g>
-          </svg>
-          <svg class="bal-chart-labels" viewBox="0 0 100 18" preserveAspectRatio="none">
-            ${labels}
-          </svg>
-        </div>
+        <div class="bal-bars">${barras}</div>
         ${mejor ? `
           <div class="bal-chart__hint">
             🏆 Mejor día: <b>${this.diaLargoConFecha(mejor.fecha)}</b> con <b>${fmtPesos(mejor.ventas)}</b>
