@@ -135,6 +135,69 @@ function rolEs(...roles) {
 }
 
 /* ============================================================
+   FILTRO DE HORARIO LABORAL — MESERO
+   ============================================================ */
+function _minutosHHMM(s, def) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '').trim());
+  if (!m) return def;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+function _minutosAhora() {
+  const d = new Date();
+  return d.getHours() * 60 + d.getMinutes();
+}
+async function meseroDentroDeHorario() {
+  let cfg = {};
+  try { cfg = await Config.get(); } catch (_) {}
+  const apStr = cfg.RESTAURANTE_HORA_APERTURA || '11:00';
+  const ciStr = cfg.RESTAURANTE_HORA_CIERRE   || '22:00';
+  const ap  = _minutosHHMM(apStr, 11 * 60);
+  const ci  = _minutosHHMM(ciStr, 22 * 60);
+  const now = _minutosAhora();
+  // Si cierre <= apertura, el turno cruza medianoche (ej. 11:00 → 02:00)
+  const dentro = (ci > ap) ? (now >= ap && now < ci) : (now >= ap || now < ci);
+  return { dentro, apertura: apStr, cierre: ciStr };
+}
+function _avisoMeseroFueraHorario(apertura, cierre) {
+  playSoundOnce(SOUNDS.warn);
+  return Swal.fire({
+    title: 'Fuera de tu horario 🌙',
+    html: `
+      <div style="text-align:center;">
+        <div style="font-size:3rem; line-height:1; margin:4px 0 10px;">⏰</div>
+        <p style="margin:0 0 12px; font-size:0.95rem; color:var(--text-soft);">
+          ¡Hola! Esta sección solo está disponible <b>durante tu jornada laboral</b>.
+        </p>
+        <div style="display:inline-block; background:var(--primary-soft); border:1px dashed var(--primary);
+                    border-radius:14px; padding:12px 18px; margin-bottom:12px;">
+          <div style="font-size:0.72rem; font-weight:800; letter-spacing:0.5px;
+                      text-transform:uppercase; color:var(--text-muted); margin-bottom:4px;">Horario de atención</div>
+          <div style="font-family:var(--font-display); font-weight:900; font-size:1.4rem; color:var(--primary);">
+            ${escapeHtml(apertura)} — ${escapeHtml(cierre)}
+          </div>
+        </div>
+        <p style="margin:0; font-size:0.82rem; color:var(--text-muted);">
+          Vuelve dentro de este horario para tomar pedidos y consultar el catálogo. 💚
+        </p>
+      </div>`,
+    confirmButtonText: 'Entendido',
+    showConfirmButton: true
+  });
+}
+/* Compuerta: true si puede operar; false (y muestra aviso) si está fuera de horario.
+   Solo restringe a MESERO; cualquier otro rol pasa siempre. */
+async function meseroPuedeOperar() {
+  if (!rolEs('MESERO')) return true;
+  startLoading();
+  let r;
+  try { r = await meseroDentroDeHorario(); }
+  finally { stopLoading(); }
+  if (r.dentro) return true;
+  await _avisoMeseroFueraHorario(r.apertura, r.cierre);
+  return false;
+}
+
+/* ============================================================
    API — comunica con Apps Script
    ============================================================ */
 async function apiGet(action, params = {}) {
@@ -579,10 +642,12 @@ async function cargarNegocios() {
   });
 }
 
-function abrirNegocio(negocio) {
+async function abrirNegocio(negocio) {
   state.negocioActual = negocio;
   playSoundOnce(SOUNDS.click);
   if (negocio.id === NEGOCIO_RESTAURANTE_ID) {
+    // Filtro de horario para MESERO (primer punto de control)
+    if (!(await meseroPuedeOperar())) return;
     irAMenuRestaurante();
   }
 }
@@ -698,8 +763,12 @@ function irAMenuRestaurante() {
       <div class="menu-tile__desc">${t.desc}</div>
       ${t.key === 'reservas' ? '<span id="res-tile-badge" class="menu-tile__badge hidden">0</span>' : ''}
     `;
-   tile.addEventListener('click', () => {
+  tile.addEventListener('click', async () => {
       playSoundOnce(SOUNDS.click);
+      // Segundo punto de control: MESERO no entra a Tomar pedido / Catálogo fuera de horario
+      if (rolEs('MESERO') && (t.view === 'tomar-pedido' || t.view === 'catalogo')) {
+        if (!(await meseroPuedeOperar())) return;
+      }
       if (t.view === 'pendiente') {
         $('#pendiente-title').textContent = t.placeholder;
         $('#pendiente-h2').textContent = t.placeholder;
@@ -8628,9 +8697,19 @@ const Creditos = {
   /* ────────────────────────────────────────────
      VENTA RÁPIDA A CRÉDITO
      ──────────────────────────────────────────── */
-  abrirVenta() {
+  async abrirVenta() {
     const self = this;
-    // Estado del modal
+    // Precargar clientes de crédito para búsqueda local instantánea por nombre
+    startLoading();
+    try {
+      const r = await apiPost('creditoListarClientes', withUser({ tipo: 'TODOS', busqueda: '' }));
+      this._ventaClientes = r.clientes || [];
+    } catch (e) {
+      stopLoading();
+      return alertErr('Error', e.message);
+    }
+    stopLoading();
+
     const st = {
       creditoClienteId: null,
       clienteNombre:    '',
@@ -8638,26 +8717,29 @@ const Creditos = {
       tipo:             '',
       saldoActual:      0,
       cupo:             0,
+      modo:             'buscar',   // 'buscar' = cliente existente | 'nuevo'
       momento:          'ALMUERZO',
       valorUnidad:      0,
-      cantidad:         1,
-      permitirSobreCupo: false
+      cantidad:         1
     };
 
     const html = `
       <div class="cred-venta">
-        <!-- Buscar / crear cliente -->
-        <label>Cliente (teléfono)</label>
-        <div class="cred-venta__tel-row">
-          <input type="tel" id="cv-tel" maxlength="10" inputmode="numeric"
-                 placeholder="3001234567" autocomplete="off" />
-          <span id="cv-tel-status" class="cobro__cli-status"></span>
+        <!-- Buscar por NOMBRE -->
+        <label>Cliente</label>
+        <div class="cred-venta__buscar" id="cv-buscar-wrap">
+          <input type="text" id="cv-buscar" placeholder="🔎 Escribe el nombre del cliente…" autocomplete="off" />
+          <div id="cv-resultados" class="cred-venta__resultados hidden"></div>
         </div>
         <div id="cv-cliente-box" class="cred-venta__cliente-box hidden"></div>
+        <button type="button" id="cv-nuevo-btn" class="cred-venta__nuevo-btn">+ Cliente nuevo</button>
+
+        <!-- Alta cliente nuevo (oculto) -->
         <div id="cv-nuevo-box" class="cred-venta__nuevo hidden">
-          <p class="muted" style="font-size:0.8rem;margin:6px 0;">Cliente nuevo — complétalo:</p>
           <label>Nombre</label>
           <input type="text" id="cv-nombre" placeholder="Nombre del cliente" autocomplete="off" />
+          <label>Teléfono (WhatsApp)</label>
+          <input type="tel" id="cv-tel" maxlength="10" inputmode="numeric" placeholder="3001234567" autocomplete="off" />
           <label>Tipo de crédito</label>
           <div class="cred-venta__tipo">
             <button type="button" class="cred-venta__tipo-btn is-active" data-cv-tipo="PARTICULAR">👤 Particular</button>
@@ -8724,35 +8806,26 @@ const Creditos = {
     });
   },
 
+
   _bindVenta(st) {
     const self = this;
+    const clientes = this._ventaClientes || [];
     const parseMoney = (s) => Number(String(s || '').replace(/\D/g, '')) || 0;
-    const fmtInput = (el) => {
-      const n = parseMoney(el.value);
-      el.value = n ? n.toLocaleString('es-CO') : '';
-    };
+    const fmtInput = (el) => { const n = parseMoney(el.value); el.value = n ? n.toLocaleString('es-CO') : ''; };
 
     const recalc = () => {
       st.valorUnidad = parseMoney($('#cv-valor').value);
       st.cantidad    = Math.max(1, Number($('#cv-cant').value) || 1);
       const total = st.valorUnidad * st.cantidad;
       $('#cv-total').textContent = fmtPesos(total);
-      // Aviso de cupo en vivo (solo particular con cliente y cupo)
       const aviso = $('#cv-cupo-aviso');
       if (st.tipo === 'PARTICULAR' && st.cupo > 0 && st.creditoClienteId) {
         const saldoNuevo = st.saldoActual + total;
         const pct = Math.round((saldoNuevo / st.cupo) * 100);
         let cls = 'ok', txt = '';
-        if (saldoNuevo > st.cupo) {
-          cls = 'full';
-          txt = `⛔ Supera el cupo. Quedaría en ${fmtPesos(saldoNuevo)} de ${fmtPesos(st.cupo)}. Deberás extender el crédito.`;
-        } else if (pct >= 80) {
-          cls = 'warn';
-          txt = `⚠️ Quedaría en ${fmtPesos(saldoNuevo)} de ${fmtPesos(st.cupo)} (${pct}%).`;
-        } else {
-          cls = 'ok';
-          txt = `Quedaría en ${fmtPesos(saldoNuevo)} de ${fmtPesos(st.cupo)} (${pct}%).`;
-        }
+        if (saldoNuevo > st.cupo) { cls = 'full'; txt = `⛔ Supera el cupo. Quedaría en ${fmtPesos(saldoNuevo)} de ${fmtPesos(st.cupo)}. Deberás extender el crédito.`; }
+        else if (pct >= 80)       { cls = 'warn'; txt = `⚠️ Quedaría en ${fmtPesos(saldoNuevo)} de ${fmtPesos(st.cupo)} (${pct}%).`; }
+        else                      { cls = 'ok';   txt = `Quedaría en ${fmtPesos(saldoNuevo)} de ${fmtPesos(st.cupo)} (${pct}%).`; }
         aviso.className = 'cred-venta__aviso cred-venta__aviso--' + cls;
         aviso.textContent = txt;
         aviso.classList.remove('hidden');
@@ -8761,77 +8834,99 @@ const Creditos = {
       }
     };
 
-    // Teléfono → buscar cliente
-    const inpTel    = $('#cv-tel');
-    const status    = $('#cv-tel-status');
-    const cliBox    = $('#cv-cliente-box');
-    const nuevoBox  = $('#cv-nuevo-box');
-    let lookupT = null;
+    const inpBuscar = $('#cv-buscar');
+    const boxRes    = $('#cv-resultados');
 
-    const resetCliente = () => {
-      st.creditoClienteId = null; st.tipo = ''; st.saldoActual = 0; st.cupo = 0;
-      cliBox.classList.add('hidden'); cliBox.innerHTML = '';
+    const limpiarSeleccion = () => {
+      st.modo = 'buscar';
+      st.creditoClienteId = null; st.clienteNombre = ''; st.clienteTel = '';
+      st.tipo = ''; st.saldoActual = 0; st.cupo = 0;
+      $('#cv-cliente-box').classList.add('hidden');
+      $('#cv-cliente-box').innerHTML = '';
+      $('#cv-buscar-wrap').classList.remove('hidden');
+      $('#cv-nuevo-btn').classList.remove('hidden');
+      inpBuscar.value = '';
+      inpBuscar.focus();
+      recalc();
     };
 
-    inpTel.addEventListener('input', () => {
-      const v = inpTel.value.replace(/\D/g, '').substring(0, 10);
-      if (v !== inpTel.value) inpTel.value = v;
-      st.clienteTel = v;
-      resetCliente();
-      nuevoBox.classList.add('hidden');
-      status.textContent = ''; status.className = 'cobro__cli-status';
-      clearTimeout(lookupT);
-      if (!/^3\d{9}$/.test(v)) return;
-      status.textContent = '🔎'; status.className = 'cobro__cli-status is-loading';
-      lookupT = setTimeout(async () => {
-        try {
-          const r = await apiGet('creditoBuscarCliente', { telefono: v, 'usuario.id': state.user.id });
-          if (r.encontrado && r.esCredito && r.credito) {
-            // Cliente de crédito existente
-            const c = r.credito;
-            st.creditoClienteId = c.id;
-            st.clienteNombre = c.nombre;
-            st.tipo = c.tipo;
-            st.saldoActual = c.saldo;
-            st.cupo = c.cupo;
-            status.textContent = '✓'; status.className = 'cobro__cli-status is-ok';
-            nuevoBox.classList.add('hidden');
-            cliBox.classList.remove('hidden');
-            cliBox.innerHTML = `
-              <div class="cred-venta__cli">
-                <div class="cred-venta__cli-name">${escapeHtml(c.nombre)}</div>
-                <div class="cred-venta__cli-meta">
-                  ${c.tipo === 'CONTRATO' ? '📄 Contrato · sin tope' :
-                    '👤 Particular · debe ' + fmtPesos(c.saldo) + ' de ' + fmtPesos(c.cupo)}
-                </div>
-              </div>`;
-            recalc();
-          } else if (r.encontrado && !r.esCredito) {
-            // Existe como cliente pero NO es de crédito → ofrecer alta
-            st.clienteNombre = r.cliente.nombre || '';
-            status.textContent = '+'; status.className = 'cobro__cli-status is-new';
-            nuevoBox.classList.remove('hidden');
-            $('#cv-nombre').value = st.clienteNombre;
-            self._setTipoNuevo(st, 'PARTICULAR');
-          } else {
-            // No existe → cliente nuevo
-            status.textContent = '+'; status.className = 'cobro__cli-status is-new';
-            nuevoBox.classList.remove('hidden');
-            $('#cv-nombre').value = '';
-            self._setTipoNuevo(st, 'PARTICULAR');
-          }
-        } catch (e) {
-          status.textContent = '⚠'; status.className = 'cobro__cli-status is-err';
+    const seleccionar = (c) => {
+      st.modo = 'buscar';
+      st.creditoClienteId = c.id;
+      st.clienteNombre = c.nombre;
+      st.clienteTel    = c.telefono;
+      st.tipo          = c.tipo;
+      st.saldoActual   = c.saldo;
+      st.cupo          = c.cupo;
+      boxRes.classList.add('hidden'); boxRes.innerHTML = '';
+      $('#cv-buscar-wrap').classList.add('hidden');
+      $('#cv-nuevo-btn').classList.add('hidden');
+      $('#cv-nuevo-box').classList.add('hidden');
+      const box = $('#cv-cliente-box');
+      box.classList.remove('hidden');
+      box.innerHTML = `
+        <div class="cred-venta__cli">
+          <div class="cred-venta__cli-name">${escapeHtml(c.nombre)}</div>
+          <div class="cred-venta__cli-meta">
+            ${c.tipo === 'CONTRATO'
+              ? '📄 Contrato · sin tope'
+              : '👤 Particular · debe ' + fmtPesos(c.saldo) + ' de ' + fmtPesos(c.cupo)}
+            · 📱 ${self.fmtTel(c.telefono)}
+          </div>
+          <button type="button" class="cred-venta__cambiar" id="cv-cambiar">↺ Cambiar cliente</button>
+        </div>`;
+      $('#cv-cambiar').addEventListener('click', limpiarSeleccion);
+      recalc();
+    };
+
+    let tBuscar = null;
+    inpBuscar.addEventListener('input', () => {
+      clearTimeout(tBuscar);
+      tBuscar = setTimeout(() => {
+        const term = inpBuscar.value.trim().toLowerCase();
+        if (!term) { boxRes.classList.add('hidden'); boxRes.innerHTML = ''; return; }
+        const matches = clientes.filter(c =>
+          String(c.nombre).toLowerCase().indexOf(term) >= 0 ||
+          String(c.telefono).indexOf(term) >= 0
+        ).slice(0, 8);
+        boxRes.classList.remove('hidden');
+        if (!matches.length) {
+          boxRes.innerHTML = `<div class="cred-venta__res-empty">Sin coincidencias. Usa <b>+ Cliente nuevo</b>.</div>`;
+          return;
         }
-      }, 400);
+        boxRes.innerHTML = matches.map(c => `
+          <button type="button" class="cred-venta__res-item" data-cv-pick="${c.id}">
+            <span class="cred-venta__res-name">${escapeHtml(c.nombre)}</span>
+            <span class="cred-venta__res-meta">${c.tipo === 'CONTRATO' ? '📄' : '👤'} ${self.fmtTel(c.telefono)}${c.saldo > 0 ? ' · debe ' + fmtPesos(c.saldo) : ''}</span>
+          </button>`).join('');
+        $$('[data-cv-pick]', boxRes).forEach(b => {
+          b.addEventListener('click', () => {
+            const c = clientes.find(x => String(x.id) === String(b.dataset.cvPick));
+            if (c) seleccionar(c);
+          });
+        });
+      }, 160);
     });
 
-    // Tipo (cliente nuevo)
+    $('#cv-nuevo-btn').addEventListener('click', () => {
+      st.modo = 'nuevo';
+      st.creditoClienteId = null;
+      $('#cv-buscar-wrap').classList.add('hidden');
+      $('#cv-nuevo-btn').classList.add('hidden');
+      boxRes.classList.add('hidden');
+      $('#cv-nuevo-box').classList.remove('hidden');
+      self._setTipoNuevo(st, 'PARTICULAR');
+      $('#cv-nombre').focus();
+      recalc();
+    });
+
     $$('[data-cv-tipo]').forEach(b => {
       b.addEventListener('click', () => self._setTipoNuevo(st, b.dataset.cvTipo));
     });
+    $('#cv-tel').addEventListener('input', () => {
+      $('#cv-tel').value = $('#cv-tel').value.replace(/\D/g, '').substring(0, 10);
+    });
 
-    // Momento
     $$('[data-cv-mom]').forEach(b => {
       b.addEventListener('click', () => {
         $$('[data-cv-mom]').forEach(x => x.classList.remove('is-active'));
@@ -8840,7 +8935,6 @@ const Creditos = {
       });
     });
 
-    // Valor (formato pesos en vivo) + cantidad
     $('#cv-valor').addEventListener('input', () => { fmtInput($('#cv-valor')); recalc(); });
     $('#cv-cant').addEventListener('input', recalc);
     $('#cv-cupo')?.addEventListener('input', () => fmtInput($('#cv-cupo')));
@@ -8857,15 +8951,11 @@ const Creditos = {
 
   _preConfirmVenta(st) {
     const parseMoney = (s) => Number(String(s || '').replace(/\D/g, '')) || 0;
-    // Si es cliente nuevo (no tiene creditoClienteId), validamos datos de alta
-    const esNuevo = !st.creditoClienteId;
-    if (!/^3\d{9}$/.test(st.clienteTel)) {
-      Swal.showValidationMessage('Ingresa un celular válido (10 dígitos, inicia en 3)');
-      return false;
-    }
-    if (esNuevo) {
+    if (st.modo === 'nuevo') {
       const nombre = $('#cv-nombre').value.trim();
       if (nombre.length < 3) { Swal.showValidationMessage('Nombre del cliente requerido'); return false; }
+      const tel = $('#cv-tel').value.replace(/\D/g, '');
+      if (!/^3\d{9}$/.test(tel)) { Swal.showValidationMessage('Celular válido (10 dígitos, inicia en 3)'); return false; }
       if (!st.tipo) { Swal.showValidationMessage('Selecciona el tipo de crédito'); return false; }
       if (st.tipo === 'PARTICULAR') {
         const cupo = parseMoney($('#cv-cupo').value);
@@ -8873,44 +8963,15 @@ const Creditos = {
         st.cupo = cupo;
       }
       st.clienteNombre = nombre;
+      st.clienteTel    = tel;
+    } else {
+      if (!st.creditoClienteId) { Swal.showValidationMessage('Busca y selecciona un cliente, o crea uno nuevo'); return false; }
     }
     const valor = parseMoney($('#cv-valor').value);
     const cant  = Math.max(1, Number($('#cv-cant').value) || 1);
     if (!(valor > 0)) { Swal.showValidationMessage('Ingresa el valor unidad'); return false; }
     if (!(cant > 0))  { Swal.showValidationMessage('Ingresa la cantidad'); return false; }
-    return {
-      esNuevo, valorUnidad: valor, cantidad: cant,
-      enviarWa: $('#cv-wa').checked
-    };
-  },
-
-  async _guardarVenta(st, datos) {
-    startLoading();
-    try {
-      // 1. Si es cliente nuevo, darlo de alta primero
-      if (datos.esNuevo) {
-        const alta = await apiPost('creditoAltaCliente', withUser({
-          nombre:   st.clienteNombre,
-          telefono: st.clienteTel,
-          tipo:     st.tipo,
-          cupo:     st.cupo
-        }));
-        st.creditoClienteId = alta.creditoClienteId;
-      }
-      // 2. Vender
-      await this._ejecutarVenta(st, datos, false);
-      stopLoading();
-      Toast && Toast.fire({ icon: 'success', title: 'Venta a crédito registrada' });
-      this.cargar();
-    } catch (e) {
-      stopLoading();
-      // Bloqueo de cupo → ofrecer atajo "Extender crédito"
-      if (this._esSobreCupo(e)) {
-        this._dialogoSobreCupo(st, datos, this._parseSobreCupo(e));
-      } else {
-        alertErr('Error', e.message);
-      }
-    }
+    return { esNuevo: st.modo === 'nuevo', valorUnidad: valor, cantidad: cant, enviarWa: $('#cv-wa').checked };
   },
 
   async _ejecutarVenta(st, datos, permitirSobreCupo) {
