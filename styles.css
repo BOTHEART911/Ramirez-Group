@@ -4447,6 +4447,9 @@ img.brand[alt="Banner"] {
   white-space: nowrap;
 }
 
+/* Filas de categoría: solo nombre+barra y monto (2 columnas) */
+.bal-rank-row--cat { grid-template-columns: 1fr auto; }
+
 /* Meseros */
 .bal-meseros {
   display: flex;
