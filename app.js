@@ -137,27 +137,49 @@ function rolEs(...roles) {
 /* ============================================================
    FILTRO DE HORARIO LABORAL — MESERO
    ============================================================ */
-function _minutosHHMM(s, def) {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '').trim());
+
+/* Extrae "HH:mm" de cualquier formato: "18:00", "7:00", o incluso
+   un valor de fecha/hora largo que venga de Sheets/Firebase. */
+function _soloHHMM(v, def) {
+  const m = /(\d{1,2}):(\d{2})/.exec(String(v == null ? '' : v));
   if (!m) return def;
-  return Number(m[1]) * 60 + Number(m[2]);
+  const h  = Math.min(23, Number(m[1]));
+  const mm = Math.min(59, Number(m[2]));
+  return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
+}
+function _minutosHHMM(hhmm) {
+  const m = /^(\d{2}):(\d{2})$/.exec(String(hhmm || ''));
+  return m ? (Number(m[1]) * 60 + Number(m[2])) : null;
 }
 function _minutosAhora() {
   const d = new Date();
   return d.getHours() * 60 + d.getMinutes();
 }
+
 async function meseroDentroDeHorario() {
+  // Leer FRESCO desde getConfig (que sí normaliza la hora a HH:mm).
+  // NO usar Config.get(): su caché viene de Firebase con la hora sin normalizar.
   let cfg = {};
-  try { cfg = await Config.get(); } catch (_) {}
-  const apStr = cfg.RESTAURANTE_HORA_APERTURA || '11:00';
-  const ciStr = cfg.RESTAURANTE_HORA_CIERRE   || '22:00';
-  const ap  = _minutosHHMM(apStr, 11 * 60);
-  const ci  = _minutosHHMM(ciStr, 22 * 60);
+  try {
+    const uid = state.user ? state.user.id : '';
+    cfg = await apiGet('getConfig', uid ? { 'usuario.id': uid } : {});
+  } catch (_) {
+    try { cfg = await Config.get(); } catch (__) {}   // respaldo
+  }
+  const apStr = _soloHHMM(cfg.RESTAURANTE_HORA_APERTURA, '11:00');
+  const ciStr = _soloHHMM(cfg.RESTAURANTE_HORA_CIERRE,   '22:00');
+  const ap  = _minutosHHMM(apStr);
+  const ci  = _minutosHHMM(ciStr);
   const now = _minutosAhora();
-  // Si cierre <= apertura, el turno cruza medianoche (ej. 11:00 → 02:00)
+
+  // Si por alguna razón no se pudo leer, NO bloqueamos (mejor dejar trabajar).
+  if (ap == null || ci == null) return { dentro: true, apertura: apStr, cierre: ciStr };
+
+  // Cierre <= apertura => el turno cruza medianoche (ej. 18:00 → 02:00)
   const dentro = (ci > ap) ? (now >= ap && now < ci) : (now >= ap || now < ci);
   return { dentro, apertura: apStr, cierre: ciStr };
 }
+
 function _avisoMeseroFueraHorario(apertura, cierre) {
   playSoundOnce(SOUNDS.warn);
   return Swal.fire({
@@ -184,7 +206,8 @@ function _avisoMeseroFueraHorario(apertura, cierre) {
     showConfirmButton: true
   });
 }
-/* Compuerta: true si puede operar; false (y muestra aviso) si está fuera de horario.
+
+/* Compuerta: true si puede operar; false (y muestra aviso) si está fuera.
    Solo restringe a MESERO; cualquier otro rol pasa siempre. */
 async function meseroPuedeOperar() {
   if (!rolEs('MESERO')) return true;
