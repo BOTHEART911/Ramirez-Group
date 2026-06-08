@@ -4176,6 +4176,104 @@ bindModalCobro(p, st) {
 };
 
 /* ============================================================
+   AJUSTE COMPROBANTES — Visor de transferencias (reutilizable)
+   ============================================================
+   Modal con miniaturas de los comprobantes de transferencia.
+   Cada miniatura muestra Cliente · Valor · Hora debajo.
+   Al tocar una, se amplía a pantalla completa (lightbox inline,
+   sin abrir pestaña). Lo usan Anclaje y Balances.
+   ============================================================ */
+const Comprobantes = {
+  abrir(lista, titulo) {
+    const items = Array.isArray(lista) ? lista : [];
+    if (!items.length) {
+      return alertInfo('Sin comprobantes',
+        'No hay imágenes de transferencias en este período.');
+    }
+
+    const grid = items.map((c, i) => `
+      <button type="button" class="comp-thumb" data-comp-idx="${i}">
+        <div class="comp-thumb__img-wrap">
+          <img class="comp-thumb__img" src="${escapeHtml(c.thumb)}"
+               alt="Comprobante" loading="lazy"
+               onerror="this.closest('.comp-thumb__img-wrap').classList.add('comp-thumb__img-wrap--err')" />
+          <span class="comp-thumb__err">🖼️<br>No disponible</span>
+        </div>
+        <div class="comp-thumb__info">
+          <div class="comp-thumb__cli">${escapeHtml(c.clienteNombre || 'Cliente general')}</div>
+          <div class="comp-thumb__meta">
+            <span class="comp-thumb__val">${fmtPesos(c.valor)}</span>
+            ${c.hora ? `<span class="comp-thumb__hora">🕒 ${escapeHtml(c.hora)}</span>` : ''}
+          </div>
+          ${c.esCredito ? `<span class="comp-thumb__tag">Crédito</span>` : ''}
+        </div>
+      </button>
+    `).join('');
+
+    Swal.fire({
+      title: titulo || '📲 Comprobantes de transferencia',
+      html: `
+        <p class="comp-sub muted">${items.length} transferencia${items.length === 1 ? '' : 's'} con comprobante. Toca una imagen para ampliarla.</p>
+        <div class="comp-grid">${grid}</div>
+      `,
+      width: 640,
+      showConfirmButton: true,
+      confirmButtonText: 'Cerrar',
+      didOpen: () => {
+        document.querySelectorAll('[data-comp-idx]').forEach(b => {
+          b.addEventListener('click', () => {
+            const idx = Number(b.dataset.compIdx);
+            this.ampliar(items[idx]);
+          });
+        });
+      }
+    });
+  },
+
+  // Lightbox a pantalla completa (overlay inline, sin pestaña nueva)
+  ampliar(c) {
+    if (!c) return;
+    // Quitar overlay previo si existiera
+    const prev = document.getElementById('comp-lightbox');
+    if (prev) prev.remove();
+
+    const ov = document.createElement('div');
+    ov.id = 'comp-lightbox';
+    ov.className = 'comp-lightbox';
+    ov.innerHTML = `
+      <div class="comp-lightbox__bar">
+        <div class="comp-lightbox__cap">
+          <b>${escapeHtml(c.clienteNombre || 'Cliente general')}</b>
+          · ${fmtPesos(c.valor)}${c.hora ? ' · 🕒 ' + escapeHtml(c.hora) : ''}
+        </div>
+        <button class="comp-lightbox__close" id="comp-lightbox-close" title="Cerrar">✕</button>
+      </div>
+      <div class="comp-lightbox__stage">
+        <img class="comp-lightbox__img" src="${escapeHtml(c.full)}" alt="Comprobante ampliado"
+             onerror="this.src='${escapeHtml(c.thumb)}'" />
+      </div>
+    `;
+    document.body.appendChild(ov);
+    document.body.style.overflow = 'hidden';
+
+    const cerrar = () => {
+      ov.remove();
+      document.body.style.overflow = '';
+    };
+    ov.querySelector('#comp-lightbox-close').addEventListener('click', cerrar);
+    ov.addEventListener('click', (e) => {
+      // Click fuera de la imagen cierra
+      if (e.target === ov || e.target.classList.contains('comp-lightbox__stage')) cerrar();
+    });
+    // ESC para cerrar
+    const onEsc = (e) => {
+      if (e.key === 'Escape') { cerrar(); document.removeEventListener('keydown', onEsc); }
+    };
+    document.addEventListener('keydown', onEsc);
+  }
+};
+
+/* ============================================================
    ============================================================
    FASE 5 / BLOQUE B — ANCLAJE DEL DÍA
    Pantalla del cierre diario: resumen en vivo, declaración
@@ -4298,10 +4396,17 @@ const Anclaje = {
         </div>` : ''}
       </div>
 
-      <div class="anc-card">
+    <div class="anc-card">
         <h3 class="anc-card__title">Pagos del día — Sistema vs Declarado</h3>
         ${this.renderBloquePago('Efectivo', '💵', 'ef', p.efectivoSistema)}
         ${this.renderBloquePago('Transferencia', '📱', 'tr', p.transferSistema)}
+        ${(p.comprobantes || []).length ? `
+          <button type="button" class="comp-btn" id="anc-comprobantes">
+            <img class="comp-btn__icon" src="https://res.cloudinary.com/dqqeavica/image/upload/v1780958731/transferencia_sqeqep.png" alt="" />
+            <span class="comp-btn__txt">Ver comprobantes de transferencia</span>
+            <span class="comp-btn__count">${p.comprobantes.length}</span>
+          </button>
+        ` : ''}
         <label for="anc-obs">Observación (opcional)</label>
         <textarea id="anc-obs" maxlength="500"
                   placeholder="Notas, novedades, justificación de diferencias…"></textarea>
@@ -4355,6 +4460,13 @@ const Anclaje = {
     const obs = $('#anc-obs');
     const cnt = $('#anc-obs-count');
     obs.addEventListener('input', () => { cnt.textContent = obs.value.length; });
+
+     // AJUSTE COMPROBANTES — abrir visor de transferencias
+    const btnComp = $('#anc-comprobantes');
+    if (btnComp) {
+      btnComp.addEventListener('click', () =>
+        Comprobantes.abrir(this.preview.comprobantes, '📲 Transferencias del día'));
+    }
 
     const foot = $('#anc-footer');
     foot.classList.remove('hidden');
@@ -6725,6 +6837,9 @@ const Balances = {
     // Bind taps
     $('#bal-ver-productos')?.addEventListener('click', () => this.abrirDetalleProductos());
     $('#bal-ver-meseros')?.addEventListener('click', () => this.abrirDetalleMeseros());
+     // AJUSTE COMPROBANTES — abrir visor de transferencias
+    $('#bal-comprobantes')?.addEventListener('click', () =>
+      Comprobantes.abrir(this.data.actual.comprobantes, '📲 Transferencias del período'));
     $$('[data-bal-mesero]').forEach(el => {
       el.addEventListener('click', () => {
         const id = el.dataset.balMesero;
@@ -7009,7 +7124,7 @@ const Balances = {
               <span class="bal-donut-legend__lbl">📱 Transferencia</span>
               <span class="bal-donut-legend__val">${fmtPesos(a.totalTransferencia)} <b>(${Math.round(pctTr * 100)}%)</b></span>
             </div>
-            ${(a.totalPropinas || 0) > 0 ? `
+           ${(a.totalPropinas || 0) > 0 ? `
             <div class="bal-donut-legend__row" style="border-top:1px dashed var(--border); padding-top:8px; margin-top:2px;">
               <span class="bal-donut-legend__dot" style="background:var(--accent);"></span>
               <span class="bal-donut-legend__lbl">🎁 Propinas <small>(no entran en ventas)</small></span>
@@ -7017,6 +7132,13 @@ const Balances = {
             </div>` : ''}
           </div>
         </div>
+        ${(a.comprobantes || []).length ? `
+          <button type="button" class="comp-btn" id="bal-comprobantes">
+            <img class="comp-btn__icon" src="https://res.cloudinary.com/dqqeavica/image/upload/v1780958731/transferencia_sqeqep.png" alt="" />
+            <span class="comp-btn__txt">Ver comprobantes de transferencia</span>
+            <span class="comp-btn__count">${a.comprobantes.length}</span>
+          </button>
+        ` : ''}
       </section>`;
   },
 
