@@ -9289,7 +9289,7 @@ const Creditos = {
      ──────────────────────────────────────────── */
   abrirModalPago(c) {
     const self = this;
-    const st = { metodo: 'EFECTIVO' };
+    const st = { metodo: 'EFECTIVO', comprobanteB64: null, comprobanteFn: null };
     Swal.fire({
       title: 'Registrar pago — ' + c.nombre.split(' ')[0],
       html: `
@@ -9304,9 +9304,25 @@ const Creditos = {
           <p class="muted" style="font-size:0.74rem;margin:4px 0 0;">Puede ser parcial. Por defecto, el total.</p>
 
           <label>Método</label>
-          <div class="cobro__metodos cred-pago__metodos">
+          <div class="cobro__metodos">
             <button type="button" class="cobro__metodo is-active" data-cp-met="EFECTIVO">💵 Efectivo</button>
             <button type="button" class="cobro__metodo" data-cp-met="TRANSFERENCIA">📱 Transferencia</button>
+            <button type="button" class="cobro__metodo" data-cp-met="MIXTO">🔀 Mixto</button>
+          </div>
+
+          <div id="cp-mixto-row" class="hidden">
+            <label>Efectivo</label>
+            <input type="number" id="cp-monto-ef" min="0" step="100" placeholder="0" />
+            <label>Transferencia</label>
+            <input type="number" id="cp-monto-tr" min="0" step="100" placeholder="0" />
+          </div>
+
+          <div id="cp-comprobante-row" class="hidden">
+            <label>Comprobante de transferencia</label>
+            <label class="cobro__file-btn">
+              <span id="cp-file-name">📎 Adjuntar imagen</span>
+              <input type="file" id="cp-comprobante" accept="image/*" hidden />
+            </label>
           </div>
 
           <label class="check-row">
@@ -9320,7 +9336,7 @@ const Creditos = {
       cancelButtonText: 'Cancelar',
       reverseButtons: true,
       focusConfirm: false,
-      didOpen: () => {
+     didOpen: () => {
         const el = $('#cp-valor');
         el.addEventListener('input', () => {
           let n = Number(el.value.replace(/\D/g, '')) || 0;
@@ -9332,23 +9348,91 @@ const Creditos = {
             $$('[data-cp-met]').forEach(x => x.classList.remove('is-active'));
             b.classList.add('is-active');
             st.metodo = b.dataset.cpMet;
+            $('#cp-mixto-row').classList.toggle('hidden', st.metodo !== 'MIXTO');
+            $('#cp-comprobante-row').classList.toggle('hidden',
+              st.metodo !== 'TRANSFERENCIA' && st.metodo !== 'MIXTO');
           });
         });
+        // Comprobante de transferencia
+        $('#cp-comprobante').addEventListener('change', async (e) => {
+          const file = e.target.files && e.target.files[0];
+          if (!file) return;
+          if (file.size > 4 * 1024 * 1024) {
+            alertWarn('Imagen muy grande', 'Máximo 4 MB.');
+            e.target.value = '';
+            return;
+          }
+          try {
+            st.comprobanteB64 = await fileToBase64(file);
+            st.comprobanteFn  = file.name;
+            $('#cp-file-name').textContent = '✓ ' + file.name;
+          } catch (err) { alertErr('Error', err.message); }
+        });
       },
-      preConfirm: () => {
+      },
+     preConfirm: () => {
         const v = Number($('#cp-valor').value.replace(/\D/g, '')) || 0;
         if (!(v > 0)) { Swal.showValidationMessage('Ingresa el valor del abono'); return false; }
-        return { valor: v, metodo: st.metodo, enviarWa: $('#cp-wa').checked };
+
+        let pagos = [];
+        if (st.metodo === 'EFECTIVO') {
+          pagos.push({ metodo: 'EFECTIVO', valor: v });
+        } else if (st.metodo === 'TRANSFERENCIA') {
+          if (!st.comprobanteB64) {
+            Swal.showValidationMessage('Sube el comprobante de transferencia'); return false;
+          }
+          pagos.push({ metodo: 'TRANSFERENCIA', valor: v, comprobanteUrl: null });
+        } else if (st.metodo === 'MIXTO') {
+          const ef = Number($('#cp-monto-ef').value) || 0;
+          const tr = Number($('#cp-monto-tr').value) || 0;
+          if (ef <= 0 || tr <= 0) {
+            Swal.showValidationMessage('Ambos montos deben ser mayores a 0'); return false;
+          }
+          if (Math.abs(ef + tr - v) > 1) {
+            Swal.showValidationMessage(`La suma (${fmtPesos(ef + tr)}) no coincide con el abono (${fmtPesos(v)})`);
+            return false;
+          }
+          if (!st.comprobanteB64) {
+            Swal.showValidationMessage('Sube el comprobante de transferencia'); return false;
+          }
+          pagos.push({ metodo: 'EFECTIVO',      valor: ef });
+          pagos.push({ metodo: 'TRANSFERENCIA', valor: tr, comprobanteUrl: null });
+        }
+
+        return {
+          valor: v,
+          metodo: st.metodo,
+          pagos,
+          comprobanteB64: st.comprobanteB64,
+          comprobanteFn:  st.comprobanteFn,
+          enviarWa: $('#cp-wa').checked
+        };
       }
-    }).then(async (res) => {
+  }).then(async (res) => {
       if (!res.isConfirmed) return;
       startLoading();
       try {
+        // 1. Subir comprobante primero (si hay) para obtener la URL
+        let comprobanteUrl = null;
+        if (res.value.comprobanteB64) {
+          const up = await apiPost('subirComprobante', withUser({
+            pedidoId: 'CRED-' + c.id,
+            filename: res.value.comprobanteFn,
+            base64:   res.value.comprobanteB64
+          }));
+          comprobanteUrl = up.url || up.URL || null;
+          (res.value.pagos || []).forEach(pg => {
+            if (pg.metodo === 'TRANSFERENCIA') pg.comprobanteUrl = comprobanteUrl;
+          });
+        }
+        // 2. Registrar el pago
         const r = await apiPost('creditoRegistrarPago', withUser({
           creditoClienteId: c.id,
-          valor:  res.value.valor,
-          metodo: res.value.metodo,
-          enviarWa: res.value.enviarWa
+          valor:          res.value.valor,
+          metodo:         res.value.metodo,
+          pagos:          res.value.pagos,
+          comprobanteUrl: comprobanteUrl,
+          enviarWa:       res.value.enviarWa
         }));
         stopLoading();
         Toast && Toast.fire({ icon: 'success', title: 'Pago registrado · saldo ' + fmtPesos(r.saldoNuevo) });
