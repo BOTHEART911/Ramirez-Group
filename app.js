@@ -2506,7 +2506,8 @@ abrirPedidoExistente(pedidoId, mesaId) {
   async cerrarMesa() {
     const p = this.pedidoActual;
     if (!p || !p.id) return;
-    if (Object.keys(p.items || {}).length > 0) {
+    const vivos = Object.values(p.items || {}).filter(it => !it.cancelado);
+    if (vivos.length > 0) {
       return alertWarn('La mesa tiene productos',
         'Solo puedes liberar una mesa que no tenga productos.');
     }
