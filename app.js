@@ -3385,11 +3385,17 @@ const Caja = {
     this.startTicker();
     // Background sync con throttle 30s
     this.sincronizarVistaBg();
+     this.cargarClientes();  
   },
 
 async cargarInicial() {
     // Compat — abrir() ya orquesta todo en background.
     this.sincronizarVistaBg();
+  },
+
+   async cargarClientes() {
+    try { this._clientes = (await apiGet('buscarClientesNombre', {})).clientes || []; }
+    catch (e) { this._clientes = []; }
   },
 
   _aplicarConfig(cfg) {
@@ -3602,22 +3608,29 @@ htmlModalCobro(p, st) {
     return `
       <div class="cobro">
 
-        <!-- Fase 4 — Cliente -->
+      <!-- Fase 4 — Cliente (búsqueda por NOMBRE, estilo Créditos) -->
         <div class="cobro__cliente">
           <label class="cobro__toggle">
             <input type="checkbox" id="cb-generico" checked />
             <span class="cobro__toggle-lbl">👤 Cliente general (sin identificar)</span>
           </label>
           <div id="cb-cliente-fields" class="cobro__cliente-fields hidden">
-            <label>Nombre</label>
-            <input type="text" id="cb-cli-nombre" placeholder="Nombre del cliente" autocomplete="off" />
-            <label>WhatsApp (10 dígitos, debe iniciar en 3)</label>
-            <div class="cobro__tel-row">
-              <input type="tel" id="cb-cli-tel" maxlength="10" inputmode="numeric"
-                     placeholder="3001234567" autocomplete="off" />
-              <span id="cb-cli-status" class="cobro__cli-status"></span>
+            <label>Buscar cliente por nombre</label>
+            <div class="cred-venta__buscar" id="cb-cli-buscar-wrap">
+              <input type="text" id="cb-cli-buscar" placeholder="🔎 Escribe el nombre del cliente…" autocomplete="off" />
+              <div id="cb-cli-resultados" class="cred-venta__resultados hidden"></div>
             </div>
-            <p class="muted" style="font-size:0.74rem; margin-top:4px;">
+            <div id="cb-cli-box" class="cred-venta__cliente-box hidden"></div>
+            <button type="button" id="cb-cli-nuevo-btn" class="cred-venta__nuevo-btn">+ Cliente nuevo</button>
+
+            <div id="cb-cli-nuevo-box" class="cred-venta__nuevo hidden">
+              <label>Nombre</label>
+              <input type="text" id="cb-cli-nombre" placeholder="Nombre del cliente" autocomplete="off" />
+              <label>WhatsApp (10 dígitos, inicia en 3)</label>
+              <input type="tel" id="cb-cli-tel" maxlength="10" inputmode="numeric" placeholder="3001234567" autocomplete="off" />
+            </div>
+
+            <p class="muted" style="font-size:0.74rem; margin-top:8px;">
               📱 Se enviará el resumen por WhatsApp al cerrar la cuenta.
             </p>
             <button type="button" id="cb-btn-ticket" class="btn-ticket-pdf" disabled>
@@ -3734,86 +3747,116 @@ bindModalCobro(p, st) {
     // Click del botón
     $('#cb-btn-ticket').addEventListener('click', () => self.crearTicket(p, st, updTicketBtn));
 
-    // Fase 4 — Toggle Cliente general
-    const chkGen      = $('#cb-generico');
-    const fieldsCli   = $('#cb-cliente-fields');
-    const inpNombre   = $('#cb-cli-nombre');
-    const inpTel      = $('#cb-cli-tel');
-    const statusCli   = $('#cb-cli-status');
+   // ── Cliente por NOMBRE (estilo Créditos) ──────────────────
+    const chkGen    = $('#cb-generico');
+    const fieldsCli = $('#cb-cliente-fields');
+    const clientes  = (self._clientes || []);
+
+    const fmtTelLocal = (t) => {
+      const s = String(t || '').replace(/\D/g, '');
+      return s.length === 10 ? s.slice(0, 3) + ' ' + s.slice(3, 6) + ' ' + s.slice(6) : s;
+    };
+    const setNuevoTel = () => {
+      const inpTel = $('#cb-cli-tel');
+      if (inpTel) inpTel.value = inpTel.value.replace(/\D/g, '').substring(0, 10);
+    };
+    const limpiarCli = () => {
+      st.clienteIdExistente = null;
+      st.clienteNombre = '';
+      st.clienteTelefono = '';
+      st.ticketUrl = null;
+      $('#cb-cli-box').classList.add('hidden');
+      $('#cb-cli-box').innerHTML = '';
+      $('#cb-cli-buscar-wrap').classList.remove('hidden');
+      $('#cb-cli-nuevo-btn').classList.remove('hidden');
+      $('#cb-cli-nuevo-box').classList.add('hidden');
+      const b = $('#cb-cli-buscar'); if (b) b.value = '';
+      const rn = $('#cb-cli-nombre'); if (rn) rn.value = '';
+      const rt = $('#cb-cli-tel'); if (rt) rt.value = '';
+      $('#cb-cli-resultados').classList.add('hidden');
+      $('#cb-cli-resultados').innerHTML = '';
+      updTicketBtn();
+    };
+    const seleccionarCli = (c) => {
+      st.clienteIdExistente = c.id;
+      st.clienteNombre      = c.nombre;
+      st.clienteTelefono    = String(c.telefono || '').replace(/\D/g, '');
+      st.ticketUrl = null;
+      const res = $('#cb-cli-resultados'); res.classList.add('hidden'); res.innerHTML = '';
+      $('#cb-cli-buscar-wrap').classList.add('hidden');
+      $('#cb-cli-nuevo-btn').classList.add('hidden');
+      $('#cb-cli-nuevo-box').classList.add('hidden');
+      const box = $('#cb-cli-box');
+      box.classList.remove('hidden');
+      box.innerHTML = `
+        <div class="cred-venta__cli">
+          <div class="cred-venta__cli-name">${escapeHtml(c.nombre)}</div>
+          <div class="cred-venta__cli-meta">📱 ${escapeHtml(fmtTelLocal(c.telefono))}</div>
+          <button type="button" class="cred-venta__cambiar" id="cb-cli-cambiar">↺ Cambiar cliente</button>
+        </div>`;
+      $('#cb-cli-cambiar').addEventListener('click', limpiarCli);
+      updTicketBtn();
+    };
+
+    const inpBuscar = $('#cb-cli-buscar');
+    const boxRes    = $('#cb-cli-resultados');
+    let tBuscar = null;
+    if (inpBuscar) {
+      inpBuscar.addEventListener('input', () => {
+        clearTimeout(tBuscar);
+        tBuscar = setTimeout(() => {
+          const term = inpBuscar.value.trim().toLowerCase();
+          if (!term) { boxRes.classList.add('hidden'); boxRes.innerHTML = ''; return; }
+          const matches = clientes.filter(c =>
+            String(c.nombre).toLowerCase().indexOf(term) >= 0 ||
+            String(c.telefono).indexOf(term) >= 0
+          ).slice(0, 8);
+          boxRes.classList.remove('hidden');
+          if (!matches.length) {
+            boxRes.innerHTML = `<div class="cred-venta__res-empty">Sin coincidencias. Usa <b>+ Cliente nuevo</b>.</div>`;
+            return;
+          }
+          boxRes.innerHTML = matches.map(c => `
+            <button type="button" class="cred-venta__res-item" data-cb-pick="${escapeHtml(c.id)}">
+              <span class="cred-venta__res-name">${escapeHtml(c.nombre)}</span>
+              <span class="cred-venta__res-meta">📱 ${escapeHtml(fmtTelLocal(c.telefono))}</span>
+            </button>`).join('');
+          $$('[data-cb-pick]', boxRes).forEach(b => {
+            b.addEventListener('click', () => {
+              const c = clientes.find(x => String(x.id) === String(b.dataset.cbPick));
+              if (c) seleccionarCli(c);
+            });
+          });
+        }, 160);
+      });
+    }
+
+    $('#cb-cli-nuevo-btn').addEventListener('click', () => {
+      st.clienteIdExistente = null;
+      $('#cb-cli-buscar-wrap').classList.add('hidden');
+      $('#cb-cli-nuevo-btn').classList.add('hidden');
+      boxRes.classList.add('hidden');
+      $('#cb-cli-nuevo-box').classList.remove('hidden');
+      const rn = $('#cb-cli-nombre'); if (rn) rn.focus();
+    });
+
+    $('#cb-cli-nombre').addEventListener('input', () => {
+      st.clienteNombre = $('#cb-cli-nombre').value.trim();
+      st.ticketUrl = null;
+      updTicketBtn();
+    });
+    $('#cb-cli-tel').addEventListener('input', () => {
+      setNuevoTel();
+      st.clienteTelefono = $('#cb-cli-tel').value.replace(/\D/g, '');
+      st.ticketUrl = null;
+      updTicketBtn();
+    });
 
     chkGen.addEventListener('change', () => {
       st.esGenerico = chkGen.checked;
       fieldsCli.classList.toggle('hidden', st.esGenerico);
-      if (st.esGenerico) {
-        st.clienteNombre = '';
-        st.clienteTelefono = '';
-        st.clienteIdExistente = null;
-        // Fase 4 — si había ticket creado, se invalida al volver a genérico
-        st.ticketUrl = null;
-        statusCli.textContent = '';
-        statusCli.className = 'cobro__cli-status';
-        inpNombre.value = '';
-        inpTel.value = '';
-      }
+      if (st.esGenerico) limpiarCli();
       updTicketBtn();
-    });
-
-    inpNombre.addEventListener('input', () => {
-      st.clienteNombre = inpNombre.value.trim();
-      updTicketBtn();
-    });
-
-    // Lookup por teléfono con debounce
-    let lookupT = null;
-    inpTel.addEventListener('input', () => {
-      // Solo permitir dígitos
-      const v = inpTel.value.replace(/\D/g, '').substring(0, 10);
-      if (v !== inpTel.value) inpTel.value = v;
-      st.clienteTelefono = v;
-      st.clienteIdExistente = null;
-      // Fase 4 — si había ticket y se cambia el teléfono, invalidar
-      if (st.ticketUrl) st.ticketUrl = null;
-      updTicketBtn();
-
-      // Estado visual del campo
-      if (v.length === 0) {
-        statusCli.textContent = '';
-        statusCli.className = 'cobro__cli-status';
-      } else if (!/^3\d{0,9}$/.test(v)) {
-        statusCli.textContent = '⚠️';
-        statusCli.className = 'cobro__cli-status is-err';
-      } else if (v.length < 10) {
-        statusCli.textContent = '...';
-        statusCli.className = 'cobro__cli-status is-loading';
-      }
-
-      clearTimeout(lookupT);
-      if (v.length !== 10 || !/^3\d{9}$/.test(v)) return;
-
-      lookupT = setTimeout(async () => {
-        statusCli.textContent = '🔎';
-        statusCli.className = 'cobro__cli-status is-loading';
-        try {
-          const r = await apiGet('buscarCliente', { telefono: v });
-         if (r && r.encontrado) {
-            st.clienteIdExistente = r.id;
-            if (!inpNombre.value.trim()) {
-              inpNombre.value = r.nombre;
-              st.clienteNombre = r.nombre;
-            }
-            statusCli.textContent = '✓';
-            statusCli.className = 'cobro__cli-status is-ok';
-            updTicketBtn();   // Cambio 2 — habilita "Generar ticket" para cliente existente
-          } else {
-            statusCli.textContent = '+';
-            statusCli.className = 'cobro__cli-status is-new';
-            statusCli.title = 'Cliente nuevo';
-          }
-        } catch (e) {
-          statusCli.textContent = '⚠';
-          statusCli.className = 'cobro__cli-status is-err';
-        }
-      }, 400);
     });
 
     // Descuento
@@ -9632,6 +9675,7 @@ const Ventas = {
     this._unsubConfig = Config.on((cfg) => this._aplicarConfig(cfg));
     // Precargar usuarios para el selector de mesero (no bloqueante)
     this.cargarUsuarios();
+      this.cargarClientes();
     this.render();
   },
 
@@ -9649,6 +9693,11 @@ const Ventas = {
       this.usuarios = [];
       console.error('listUsuariosVentas:', e);
     }
+  },
+
+   async cargarClientes() {
+    try { this._clientes = (await apiGet('buscarClientesNombre', {})).clientes || []; }
+    catch (e) { this._clientes = []; }
   },
 
   render() {
@@ -9726,22 +9775,29 @@ const Ventas = {
     return `
       <div class="cobro vt-modal">
 
-        <!-- Cliente -->
+       <!-- Cliente (búsqueda por NOMBRE, estilo Créditos) -->
         <div class="cobro__cliente">
           <label class="cobro__toggle">
             <input type="checkbox" id="vt-generico" checked />
             <span class="cobro__toggle-lbl">👤 Cliente general (sin identificar)</span>
           </label>
           <div id="vt-cliente-fields" class="cobro__cliente-fields hidden">
-            <label>Nombre</label>
-            <input type="text" id="vt-cli-nombre" placeholder="Nombre del cliente" autocomplete="off" />
-            <label>WhatsApp (10 dígitos, inicia en 3)</label>
-            <div class="cobro__tel-row">
-              <input type="tel" id="vt-cli-tel" maxlength="10" inputmode="numeric"
-                     placeholder="3001234567" autocomplete="off" />
-              <span id="vt-cli-status" class="cobro__cli-status"></span>
+            <label>Buscar cliente por nombre</label>
+            <div class="cred-venta__buscar" id="vt-cli-buscar-wrap">
+              <input type="text" id="vt-cli-buscar" placeholder="🔎 Escribe el nombre del cliente…" autocomplete="off" />
+              <div id="vt-cli-resultados" class="cred-venta__resultados hidden"></div>
             </div>
-            <p class="muted" style="font-size:0.74rem; margin-top:4px;">
+            <div id="vt-cli-box" class="cred-venta__cliente-box hidden"></div>
+            <button type="button" id="vt-cli-nuevo-btn" class="cred-venta__nuevo-btn">+ Cliente nuevo</button>
+
+            <div id="vt-cli-nuevo-box" class="cred-venta__nuevo hidden">
+              <label>Nombre</label>
+              <input type="text" id="vt-cli-nombre" placeholder="Nombre del cliente" autocomplete="off" />
+              <label>WhatsApp (10 dígitos, inicia en 3)</label>
+              <input type="tel" id="vt-cli-tel" maxlength="10" inputmode="numeric" placeholder="3001234567" autocomplete="off" />
+            </div>
+
+            <p class="muted" style="font-size:0.74rem; margin-top:8px;">
               📱 Se enviará el resumen por WhatsApp al registrar.
             </p>
           </div>
@@ -9857,49 +9913,103 @@ const Ventas = {
       recalcTotales();
     });
 
-    // Toggle cliente general
+   // ── Cliente por NOMBRE (estilo Créditos) ──────────────────
     const chkGen    = $('#vt-generico');
     const fieldsCli = $('#vt-cliente-fields');
-    const inpNombre = $('#vt-cli-nombre');
-    const inpTel    = $('#vt-cli-tel');
-    const statusCli = $('#vt-cli-status');
+    const clientes  = (self._clientes || []);
+
+    const fmtTelLocal = (t) => {
+      const s = String(t || '').replace(/\D/g, '');
+      return s.length === 10 ? s.slice(0, 3) + ' ' + s.slice(3, 6) + ' ' + s.slice(6) : s;
+    };
+    const limpiarCli = () => {
+      st.clienteIdExistente = null;
+      st.clienteNombre = '';
+      st.clienteTelefono = '';
+      $('#vt-cli-box').classList.add('hidden');
+      $('#vt-cli-box').innerHTML = '';
+      $('#vt-cli-buscar-wrap').classList.remove('hidden');
+      $('#vt-cli-nuevo-btn').classList.remove('hidden');
+      $('#vt-cli-nuevo-box').classList.add('hidden');
+      const b = $('#vt-cli-buscar'); if (b) b.value = '';
+      const rn = $('#vt-cli-nombre'); if (rn) rn.value = '';
+      const rt = $('#vt-cli-tel'); if (rt) rt.value = '';
+      $('#vt-cli-resultados').classList.add('hidden');
+      $('#vt-cli-resultados').innerHTML = '';
+    };
+    const seleccionarCli = (c) => {
+      st.clienteIdExistente = c.id;
+      st.clienteNombre      = c.nombre;
+      st.clienteTelefono    = String(c.telefono || '').replace(/\D/g, '');
+      const res = $('#vt-cli-resultados'); res.classList.add('hidden'); res.innerHTML = '';
+      $('#vt-cli-buscar-wrap').classList.add('hidden');
+      $('#vt-cli-nuevo-btn').classList.add('hidden');
+      $('#vt-cli-nuevo-box').classList.add('hidden');
+      const box = $('#vt-cli-box');
+      box.classList.remove('hidden');
+      box.innerHTML = `
+        <div class="cred-venta__cli">
+          <div class="cred-venta__cli-name">${escapeHtml(c.nombre)}</div>
+          <div class="cred-venta__cli-meta">📱 ${escapeHtml(fmtTelLocal(c.telefono))}</div>
+          <button type="button" class="cred-venta__cambiar" id="vt-cli-cambiar">↺ Cambiar cliente</button>
+        </div>`;
+      $('#vt-cli-cambiar').addEventListener('click', limpiarCli);
+    };
+
+    const inpBuscar = $('#vt-cli-buscar');
+    const boxRes    = $('#vt-cli-resultados');
+    let tBuscar = null;
+    if (inpBuscar) {
+      inpBuscar.addEventListener('input', () => {
+        clearTimeout(tBuscar);
+        tBuscar = setTimeout(() => {
+          const term = inpBuscar.value.trim().toLowerCase();
+          if (!term) { boxRes.classList.add('hidden'); boxRes.innerHTML = ''; return; }
+          const matches = clientes.filter(c =>
+            String(c.nombre).toLowerCase().indexOf(term) >= 0 ||
+            String(c.telefono).indexOf(term) >= 0
+          ).slice(0, 8);
+          boxRes.classList.remove('hidden');
+          if (!matches.length) {
+            boxRes.innerHTML = `<div class="cred-venta__res-empty">Sin coincidencias. Usa <b>+ Cliente nuevo</b>.</div>`;
+            return;
+          }
+          boxRes.innerHTML = matches.map(c => `
+            <button type="button" class="cred-venta__res-item" data-vt-pick="${escapeHtml(c.id)}">
+              <span class="cred-venta__res-name">${escapeHtml(c.nombre)}</span>
+              <span class="cred-venta__res-meta">📱 ${escapeHtml(fmtTelLocal(c.telefono))}</span>
+            </button>`).join('');
+          $$('[data-vt-pick]', boxRes).forEach(b => {
+            b.addEventListener('click', () => {
+              const c = clientes.find(x => String(x.id) === String(b.dataset.vtPick));
+              if (c) seleccionarCli(c);
+            });
+          });
+        }, 160);
+      });
+    }
+
+    $('#vt-cli-nuevo-btn').addEventListener('click', () => {
+      st.clienteIdExistente = null;
+      $('#vt-cli-buscar-wrap').classList.add('hidden');
+      $('#vt-cli-nuevo-btn').classList.add('hidden');
+      boxRes.classList.add('hidden');
+      $('#vt-cli-nuevo-box').classList.remove('hidden');
+      const rn = $('#vt-cli-nombre'); if (rn) rn.focus();
+    });
+
+    $('#vt-cli-nombre').addEventListener('input', () => {
+      st.clienteNombre = $('#vt-cli-nombre').value.trim();
+    });
+    $('#vt-cli-tel').addEventListener('input', () => {
+      $('#vt-cli-tel').value = $('#vt-cli-tel').value.replace(/\D/g, '').substring(0, 10);
+      st.clienteTelefono = $('#vt-cli-tel').value;
+    });
+
     chkGen.addEventListener('change', () => {
       st.esGenerico = chkGen.checked;
       fieldsCli.classList.toggle('hidden', st.esGenerico);
-      if (st.esGenerico) {
-        st.clienteNombre = ''; st.clienteTelefono = ''; st.clienteIdExistente = null;
-        statusCli.textContent = ''; statusCli.className = 'cobro__cli-status';
-        inpNombre.value = ''; inpTel.value = '';
-      }
-    });
-    inpNombre.addEventListener('input', () => { st.clienteNombre = inpNombre.value.trim(); });
-
-    let lookupT = null;
-    inpTel.addEventListener('input', () => {
-      const v = inpTel.value.replace(/\D/g, '').substring(0, 10);
-      if (v !== inpTel.value) inpTel.value = v;
-      st.clienteTelefono = v;
-      st.clienteIdExistente = null;
-      if (v.length === 0) { statusCli.textContent = ''; statusCli.className = 'cobro__cli-status'; }
-      else if (!/^3\d{0,9}$/.test(v)) { statusCli.textContent = '⚠️'; statusCli.className = 'cobro__cli-status is-err'; }
-      else if (v.length < 10) { statusCli.textContent = '...'; statusCli.className = 'cobro__cli-status is-loading'; }
-      clearTimeout(lookupT);
-      if (v.length !== 10 || !/^3\d{9}$/.test(v)) return;
-      lookupT = setTimeout(async () => {
-        statusCli.textContent = '🔎'; statusCli.className = 'cobro__cli-status is-loading';
-        try {
-          const r = await apiGet('buscarCliente', { telefono: v });
-          if (r && r.encontrado) {
-            st.clienteIdExistente = r.id;
-            if (!inpNombre.value.trim()) { inpNombre.value = r.nombre; st.clienteNombre = r.nombre; }
-            statusCli.textContent = '✓'; statusCli.className = 'cobro__cli-status is-ok';
-          } else {
-            statusCli.textContent = '+'; statusCli.className = 'cobro__cli-status is-new';
-          }
-        } catch (e) {
-          statusCli.textContent = '⚠'; statusCli.className = 'cobro__cli-status is-err';
-        }
-      }, 400);
+      if (st.esGenerico) limpiarCli();
     });
 
     // Métodos de pago
