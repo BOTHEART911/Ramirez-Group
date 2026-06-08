@@ -450,10 +450,22 @@ async function checkVersion() {
   if (__versionCheckInFlight) return;
   __versionCheckInFlight = true;
   try {
-    const r = await fetch('./version.js?t=' + Date.now(), { cache: 'no-store' });
+  const r = await fetch('./version.js?t=' + Date.now(), { cache: 'no-store' });
     if (!r.ok) return;
-    const j = await r.json();
-    const serverVersion = String(j.version || '').trim();
+
+    // Leer como TEXTO y extraer la versión de forma tolerante:
+    //   JSON puro:     {"version":"2.5.0"}
+    //   Asignación JS: var APP_VERSION = "2.5.0";  /  window.version = '2.5.0'
+    const raw = await r.text();
+    let serverVersion = '';
+    try {
+      const j = JSON.parse(raw);
+      serverVersion = String(j.version || j.v || '').trim();
+    } catch (_) {
+      const m = raw.match(/['"]?version['"]?\s*[:=]\s*['"]([^'"]+)['"]/i)
+             || raw.match(/(\d+\.\d+(?:\.\d+)?)/);
+      if (m) serverVersion = String(m[1]).trim();
+    }
     if (!serverVersion) return;
 
   // Primera lectura: guardar la versión y pintarla en todos los letreros
@@ -3541,10 +3553,16 @@ tickEsperas() {
   /* ────────────────────────────────────────────
      MODAL DE COBRO
      ──────────────────────────────────────────── */
-  async abrirModalCobro(pedidoId) {
+ async abrirModalCobro(pedidoId) {
     const p = this.pedidos[pedidoId];
     if (!p) return;
-     
+
+    // Garantiza que la lista de clientes esté cargada ANTES de abrir el modal
+    // (igual que en Créditos). Evita que el buscador capture un arreglo vacío.
+    if (!Array.isArray(this._clientes) || !this._clientes.length) {
+      await this.cargarClientes();
+    }
+
 // Estado interno del modal
     const propinaPct = this.config.propinaSugeridaPct;
     const subtotalNum = Number(p.subtotal) || 0;
@@ -9721,7 +9739,11 @@ const Ventas = {
   /* ────────────────────────────────────────────
      MODAL DE REGISTRO (similar al de Caja)
      ──────────────────────────────────────────── */
-  abrirModalVenta() {
+ async abrirModalVenta() {
+    // Garantiza la lista de clientes ANTES de abrir el modal (igual que Créditos)
+    if (!Array.isArray(this._clientes) || !this._clientes.length) {
+      await this.cargarClientes();
+    }
     const propinaPct = this.config.propinaSugeridaPct;
     const st = {
       subtotal:          0,
