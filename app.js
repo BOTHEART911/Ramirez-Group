@@ -9369,7 +9369,7 @@ const Creditos = {
           } catch (err) { alertErr('Error', err.message); }
         });
       },
-      },
+       
      preConfirm: () => {
         const v = Number($('#cp-valor').value.replace(/\D/g, '')) || 0;
         if (!(v > 0)) { Swal.showValidationMessage('Ingresa el valor del abono'); return false; }
