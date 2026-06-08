@@ -9611,6 +9611,492 @@ const Bot = {
 };
 
 /* ============================================================
+   ============================================================
+   AJUSTE 3 — VENTAS (registro extemporáneo)
+   ============================================================
+   Digitación de ventas cuando no hubo conexión. Abre un modal de
+   pago similar al de Caja, pero con subtotal manual. Crea un
+   pedido PAGADO en el backend (entra en Balances/Anclaje).
+   Roles: SUPERUSUARIO, ADMINISTRADOR, CAJA (y DEV).
+   ============================================================
+   ============================================================ */
+const Ventas = {
+  config: { descuentoMaxPct: 10, propinaSugeridaPct: 10 },
+  usuarios: [],          // para selector de mesero (cache de sesión)
+  _unsubConfig: null,
+
+  async abrir() {
+    showView('ventas');
+    // Config para tope de descuento y propina sugerida
+    this._aplicarConfig(await Config.get().catch(() => ({})));
+    this._unsubConfig = Config.on((cfg) => this._aplicarConfig(cfg));
+    // Precargar usuarios para el selector de mesero (no bloqueante)
+    this.cargarUsuarios();
+    this.render();
+  },
+
+  _aplicarConfig(cfg) {
+    this.config = {
+      descuentoMaxPct:    Number(cfg.CAJA_DESCUENTO_MAX_PCT) || 10,
+      propinaSugeridaPct: Number(cfg.PROPINA_SUGERIDA_PCT)   || 10
+    };
+  },
+
+  async cargarUsuarios() {
+    try {
+      this.usuarios = await apiPost('listUsuariosVentas', withUser({})) || [];
+    } catch (e) {
+      this.usuarios = [];
+      console.error('listUsuariosVentas:', e);
+    }
+  },
+
+  render() {
+    const cont = $('#ventas-content');
+    if (!cont) return;
+    cont.innerHTML = `
+      <div class="ventas-intro card">
+        <div class="ventas-intro__icon">🧾</div>
+        <h3>Registro de ventas extemporáneo</h3>
+        <p class="muted">
+          Usa esta sección para digitar ventas que ocurrieron <b>sin conexión</b>
+          (corte de internet o energía). Cada registro se guarda como una venta
+          pagada y entra en los balances y el anclaje del día.
+        </p>
+        <button id="ventas-btn-nueva" class="btn btn-primary btn-lg btn-block mt-md">
+          ➕ Registrar venta
+        </button>
+      </div>
+    `;
+    const btn = $('#ventas-btn-nueva');
+    if (btn) btn.addEventListener('click', () => this.abrirModalVenta());
+  },
+
+  /* ────────────────────────────────────────────
+     MODAL DE REGISTRO (similar al de Caja)
+     ──────────────────────────────────────────── */
+  abrirModalVenta() {
+    const propinaPct = this.config.propinaSugeridaPct;
+    const st = {
+      subtotal:          0,
+      descuentoPct:      0,
+      descuentoValor:    0,
+      total:             0,
+      descuentoMaxPct:   this.config.descuentoMaxPct,
+      metodo:            'EFECTIVO',
+      comprobanteB64:    null,
+      comprobanteFn:     null,
+      // cliente
+      esGenerico:        true,
+      clienteNombre:     '',
+      clienteTelefono:   '',
+      clienteIdExistente: null,
+      // propina
+      propinaSugeridaPct: propinaPct,
+      propinaSugerida:    0,
+      propinaIncluida:    false,
+      propinaValor:       0,
+      propinaTocada:      false,
+      // mesero (solo si hay propina)
+      meseroId:          '',
+      observaciones:     ''
+    };
+    const self = this;
+    Swal.fire({
+      title: 'Registrar venta',
+      width: 560,
+      html: this.htmlModal(st),
+      showCancelButton: true,
+      confirmButtonText: 'Registrar venta',
+      cancelButtonText: 'Cancelar',
+      reverseButtons: true,
+      focusConfirm: false,
+      didOpen: () => self.bindModal(st),
+      preConfirm: () => self.validar(st)
+    }).then((res) => {
+      if (!res.isConfirmed) return;
+      self.ejecutar(st, res.value);
+    });
+  },
+
+  htmlModal(st) {
+    const optsMesero = this.usuarios.map(u =>
+      `<option value="${u.id}">${escapeHtml(u.nombre)} (${escapeHtml(u.rol)})</option>`
+    ).join('');
+    return `
+      <div class="cobro vt-modal">
+
+        <!-- Cliente -->
+        <div class="cobro__cliente">
+          <label class="cobro__toggle">
+            <input type="checkbox" id="vt-generico" checked />
+            <span class="cobro__toggle-lbl">👤 Cliente general (sin identificar)</span>
+          </label>
+          <div id="vt-cliente-fields" class="cobro__cliente-fields hidden">
+            <label>Nombre</label>
+            <input type="text" id="vt-cli-nombre" placeholder="Nombre del cliente" autocomplete="off" />
+            <label>WhatsApp (10 dígitos, inicia en 3)</label>
+            <div class="cobro__tel-row">
+              <input type="tel" id="vt-cli-tel" maxlength="10" inputmode="numeric"
+                     placeholder="3001234567" autocomplete="off" />
+              <span id="vt-cli-status" class="cobro__cli-status"></span>
+            </div>
+            <p class="muted" style="font-size:0.74rem; margin-top:4px;">
+              📱 Se enviará el resumen por WhatsApp al registrar.
+            </p>
+          </div>
+        </div>
+
+        <!-- Totales -->
+        <div class="cobro__totales">
+          <div class="cobro__row cobro__row--desc">
+            <label for="vt-subtotal">Subtotal</label>
+            <input type="text" id="vt-subtotal" inputmode="numeric" placeholder="0"
+                   style="width:130px; text-align:right; font-weight:700;" />
+          </div>
+          <div class="cobro__row cobro__row--desc">
+            <label for="vt-desc">Descuento %</label>
+            <input type="number" id="vt-desc" min="0" max="${st.descuentoMaxPct}" step="1" value="0" />
+            <span id="vt-desc-val">$ 0</span>
+          </div>
+          <div class="cobro__row cobro__row--total">
+            <span>TOTAL</span>
+            <span id="vt-total">$ 0</span>
+          </div>
+
+          <label class="cobro__propina-toggle" id="vt-propina-hint">
+            <input type="checkbox" id="vt-propina-chk" />
+            <span>💡 Incluir propina sugerida (${st.propinaSugeridaPct}%):
+              <b id="vt-propina-val">$ 0</b></span>
+          </label>
+          <div class="cobro__row cobro__row--virtual hidden" id="vt-virtual-row">
+            <span>TOTAL CON PROPINA</span>
+            <span id="vt-total-virtual">$ 0</span>
+          </div>
+        </div>
+
+        <div id="vt-propina-input-row" class="cobro__propina-input hidden">
+          <label>Valor de la propina (editable)</label>
+          <input type="number" id="vt-propina-monto" min="0" step="500" value="0" inputmode="numeric" />
+        </div>
+
+        <!-- Mesero: solo visible si hay propina -->
+        <div id="vt-mesero-row" class="hidden">
+          <label>Mesero que recibe la propina</label>
+          <select id="vt-mesero">
+            <option value="">— Selecciona el mesero —</option>
+            ${optsMesero}
+          </select>
+        </div>
+
+        <!-- Método de pago -->
+        <label>Método de pago</label>
+        <div class="cobro__metodos">
+          <button type="button" class="cobro__metodo is-active" data-metodo="EFECTIVO">💵 Efectivo</button>
+          <button type="button" class="cobro__metodo" data-metodo="TRANSFERENCIA">📱 Transferencia</button>
+          <button type="button" class="cobro__metodo" data-metodo="MIXTO">🔀 Mixto</button>
+        </div>
+
+        <div id="vt-mixto-row" class="hidden">
+          <label>Efectivo</label>
+          <input type="number" id="vt-monto-ef" min="0" step="100" placeholder="0" />
+          <label>Transferencia</label>
+          <input type="number" id="vt-monto-tr" min="0" step="100" placeholder="0" />
+        </div>
+
+        <div id="vt-comprobante-row" class="hidden">
+          <label>Comprobante de transferencia</label>
+          <label class="cobro__file-btn">
+            <span id="vt-file-name">📎 Adjuntar imagen</span>
+            <input type="file" id="vt-comprobante" accept="image/*" hidden />
+          </label>
+        </div>
+
+        <label>Observación (opcional)</label>
+        <textarea id="vt-obs" rows="2" placeholder="Notas del registro (opcional)…"></textarea>
+      </div>
+    `;
+  },
+
+  bindModal(st) {
+    const self = this;
+    const parseMoney = (s) => Number(String(s || '').replace(/\D/g, '')) || 0;
+
+    const recalcTotales = () => {
+      st.descuentoValor = Math.round(st.subtotal * st.descuentoPct / 100);
+      st.total = st.subtotal - st.descuentoValor;
+      $('#vt-desc-val').textContent = '-' + fmtPesos(st.descuentoValor);
+      $('#vt-total').textContent    = fmtPesos(st.total);
+      // recalcular propina sugerida sobre el total
+      st.propinaSugerida = Math.round(st.total * st.propinaSugeridaPct / 100);
+      const pv = $('#vt-propina-val');
+      if (pv) pv.textContent = fmtPesos(st.propinaSugerida);
+      if (typeof self._reSyncPropina === 'function') self._reSyncPropina();
+    };
+
+    // Subtotal manual (formato pesos en vivo)
+    const inpSub = $('#vt-subtotal');
+    inpSub.addEventListener('input', () => {
+      st.subtotal = parseMoney(inpSub.value);
+      inpSub.value = st.subtotal ? st.subtotal.toLocaleString('es-CO') : '';
+      recalcTotales();
+    });
+
+    // Descuento
+    $('#vt-desc').addEventListener('input', (e) => {
+      let pct = Number(e.target.value) || 0;
+      if (pct < 0) pct = 0;
+      const tope = st.descuentoMaxPct;
+      const esSuperAdmin = rolEs('SUPERUSUARIO', 'ADMINISTRADOR');
+      if (!esSuperAdmin && pct > tope) {
+        pct = tope;
+        e.target.value = pct;
+        Toast && Toast.fire({ icon: 'warning', title: `Máximo ${tope}%` });
+      }
+      st.descuentoPct = pct;
+      recalcTotales();
+    });
+
+    // Toggle cliente general
+    const chkGen    = $('#vt-generico');
+    const fieldsCli = $('#vt-cliente-fields');
+    const inpNombre = $('#vt-cli-nombre');
+    const inpTel    = $('#vt-cli-tel');
+    const statusCli = $('#vt-cli-status');
+    chkGen.addEventListener('change', () => {
+      st.esGenerico = chkGen.checked;
+      fieldsCli.classList.toggle('hidden', st.esGenerico);
+      if (st.esGenerico) {
+        st.clienteNombre = ''; st.clienteTelefono = ''; st.clienteIdExistente = null;
+        statusCli.textContent = ''; statusCli.className = 'cobro__cli-status';
+        inpNombre.value = ''; inpTel.value = '';
+      }
+    });
+    inpNombre.addEventListener('input', () => { st.clienteNombre = inpNombre.value.trim(); });
+
+    let lookupT = null;
+    inpTel.addEventListener('input', () => {
+      const v = inpTel.value.replace(/\D/g, '').substring(0, 10);
+      if (v !== inpTel.value) inpTel.value = v;
+      st.clienteTelefono = v;
+      st.clienteIdExistente = null;
+      if (v.length === 0) { statusCli.textContent = ''; statusCli.className = 'cobro__cli-status'; }
+      else if (!/^3\d{0,9}$/.test(v)) { statusCli.textContent = '⚠️'; statusCli.className = 'cobro__cli-status is-err'; }
+      else if (v.length < 10) { statusCli.textContent = '...'; statusCli.className = 'cobro__cli-status is-loading'; }
+      clearTimeout(lookupT);
+      if (v.length !== 10 || !/^3\d{9}$/.test(v)) return;
+      lookupT = setTimeout(async () => {
+        statusCli.textContent = '🔎'; statusCli.className = 'cobro__cli-status is-loading';
+        try {
+          const r = await apiGet('buscarCliente', { telefono: v });
+          if (r && r.encontrado) {
+            st.clienteIdExistente = r.id;
+            if (!inpNombre.value.trim()) { inpNombre.value = r.nombre; st.clienteNombre = r.nombre; }
+            statusCli.textContent = '✓'; statusCli.className = 'cobro__cli-status is-ok';
+          } else {
+            statusCli.textContent = '+'; statusCli.className = 'cobro__cli-status is-new';
+          }
+        } catch (e) {
+          statusCli.textContent = '⚠'; statusCli.className = 'cobro__cli-status is-err';
+        }
+      }, 400);
+    });
+
+    // Métodos de pago
+    $$('.cobro__metodo', $('.vt-modal')).forEach(b => {
+      b.addEventListener('click', () => {
+        $$('.cobro__metodo', $('.vt-modal')).forEach(x => x.classList.remove('is-active'));
+        b.classList.add('is-active');
+        st.metodo = b.dataset.metodo;
+        $('#vt-mixto-row').classList.toggle('hidden', st.metodo !== 'MIXTO');
+        $('#vt-comprobante-row').classList.toggle('hidden',
+          st.metodo !== 'TRANSFERENCIA' && st.metodo !== 'MIXTO');
+      });
+    });
+
+    // Comprobante
+    $('#vt-comprobante').addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      if (file.size > 4 * 1024 * 1024) {
+        alertWarn('Imagen muy grande', 'Máximo 4 MB.');
+        e.target.value = '';
+        return;
+      }
+      try {
+        st.comprobanteB64 = await fileToBase64(file);
+        st.comprobanteFn  = file.name;
+        $('#vt-file-name').textContent = '✓ ' + file.name;
+      } catch (err) { alertErr('Error', err.message); }
+    });
+
+    // Propina: check + total virtual + monto editable + mostrar selector mesero
+    const chkProp   = $('#vt-propina-chk');
+    const virtRow   = $('#vt-virtual-row');
+    const virtVal   = $('#vt-total-virtual');
+    const propRow   = $('#vt-propina-input-row');
+    const propMonto = $('#vt-propina-monto');
+    const meseroRow = $('#vt-mesero-row');
+    const selMesero = $('#vt-mesero');
+
+    const repintarVirtual = () => {
+      if (virtVal) virtVal.textContent = fmtPesos(st.total + (Number(st.propinaValor) || 0));
+    };
+    self._reSyncPropina = () => {
+      if (!st.propinaTocada) {
+        st.propinaValor = st.propinaSugerida || 0;
+        if (propMonto) propMonto.value = st.propinaValor;
+      }
+      repintarVirtual();
+    };
+
+    if (chkProp) {
+      chkProp.addEventListener('change', () => {
+        st.propinaIncluida = chkProp.checked;
+        virtRow  && virtRow.classList.toggle('hidden', !chkProp.checked);
+        propRow  && propRow.classList.toggle('hidden', !chkProp.checked);
+        // El campo Mesero solo se activa si hay propina (tu especificación)
+        meseroRow && meseroRow.classList.toggle('hidden', !chkProp.checked);
+        if (!chkProp.checked) { st.meseroId = ''; if (selMesero) selMesero.value = ''; }
+        if (chkProp.checked) {
+          if (!st.propinaTocada) {
+            st.propinaValor = st.propinaSugerida || 0;
+            if (propMonto) propMonto.value = st.propinaValor;
+          }
+          repintarVirtual();
+        }
+      });
+    }
+    if (propMonto) {
+      propMonto.addEventListener('input', () => {
+        st.propinaValor = Math.max(0, Number(propMonto.value) || 0);
+        st.propinaTocada = true;
+        repintarVirtual();
+      });
+    }
+    if (selMesero) {
+      selMesero.addEventListener('change', () => { st.meseroId = selMesero.value || ''; });
+    }
+
+    const obsEl = $('#vt-obs');
+    if (obsEl) obsEl.addEventListener('input', () => { st.observaciones = obsEl.value.trim(); });
+
+    recalcTotales();
+  },
+
+  validar(st) {
+    if (!(st.subtotal > 0)) { Swal.showValidationMessage('Ingresa el subtotal'); return false; }
+
+    const tope = st.descuentoMaxPct;
+    const esSuperAdmin = rolEs('SUPERUSUARIO', 'ADMINISTRADOR');
+    if (!esSuperAdmin && st.descuentoPct > tope) {
+      Swal.showValidationMessage(`Descuento máximo ${tope}%`); return false;
+    }
+
+    // Cliente identificado
+    if (!st.esGenerico) {
+      if (!(st.clienteNombre || '').trim()) {
+        Swal.showValidationMessage('Ingresa el nombre del cliente'); return false;
+      }
+      if (!/^3\d{9}$/.test(st.clienteTelefono || '')) {
+        Swal.showValidationMessage('WhatsApp válido (10 dígitos, inicia en 3)'); return false;
+      }
+    }
+
+    // Propina → exige mesero
+    if (st.propinaIncluida) {
+      if (!(Number(st.propinaValor) > 0)) {
+        Swal.showValidationMessage('La propina debe ser mayor a 0 o desactiva el check'); return false;
+      }
+      if (!st.meseroId) {
+        Swal.showValidationMessage('Selecciona el mesero que recibe la propina'); return false;
+      }
+    }
+
+    // Pagos
+    let pagos = [];
+    if (st.metodo === 'EFECTIVO') {
+      pagos.push({ metodo: 'EFECTIVO', valor: st.total });
+    } else if (st.metodo === 'TRANSFERENCIA') {
+      if (!st.comprobanteB64) { Swal.showValidationMessage('Sube el comprobante de transferencia'); return false; }
+      pagos.push({ metodo: 'TRANSFERENCIA', valor: st.total, comprobanteUrl: null });
+    } else if (st.metodo === 'MIXTO') {
+      const ef = Number($('#vt-monto-ef').value) || 0;
+      const tr = Number($('#vt-monto-tr').value) || 0;
+      if (ef <= 0 || tr <= 0) { Swal.showValidationMessage('Ambos montos deben ser mayores a 0'); return false; }
+      if (Math.abs(ef + tr - st.total) > 1) {
+        Swal.showValidationMessage(`La suma (${fmtPesos(ef + tr)}) no coincide con el total (${fmtPesos(st.total)})`);
+        return false;
+      }
+      if (!st.comprobanteB64) { Swal.showValidationMessage('Sube el comprobante de transferencia'); return false; }
+      pagos.push({ metodo: 'EFECTIVO', valor: ef });
+      pagos.push({ metodo: 'TRANSFERENCIA', valor: tr, comprobanteUrl: null });
+    }
+
+    return {
+      subtotal:       st.subtotal,
+      descuentoPct:   st.descuentoPct,
+      pagos,
+      comprobanteB64: st.comprobanteB64,
+      comprobanteFn:  st.comprobanteFn,
+      esGenerico:     st.esGenerico,
+      clienteNombre:  st.clienteNombre,
+      clienteTelefono: st.clienteTelefono,
+      propina:        st.propinaIncluida ? Math.max(0, Number(st.propinaValor) || 0) : 0,
+      meseroId:       st.propinaIncluida ? (st.meseroId || '') : '',
+      observaciones:  st.observaciones || ''
+    };
+  },
+
+  async ejecutar(st, datos) {
+    startLoading();
+    try {
+      // 1. Comprobante primero (si hay)
+      if (datos.comprobanteB64) {
+        const up = await apiPost('subirComprobante', withUser({
+          pedidoId: 'EXTEMP',
+          filename: datos.comprobanteFn,
+          base64:   datos.comprobanteB64
+        }));
+        const url = up.url || up.URL || null;
+        datos.pagos.forEach(pg => {
+          if (pg.metodo === 'TRANSFERENCIA') pg.comprobanteUrl = url;
+        });
+      }
+
+      // 2. Registrar la venta
+      await apiPost('registrarVentaExtemporanea', withUser({
+        subtotal:      datos.subtotal,
+        descuentoPct:  datos.descuentoPct,
+        metodo:        datos.pagos.length === 1 ? datos.pagos[0].metodo : 'MIXTO',
+        pagos:         datos.pagos,
+        propina:       datos.propina,
+        meseroId:      datos.meseroId,
+        observaciones: datos.observaciones,
+        esGenerico:    !!datos.esGenerico,
+        cliente:       datos.esGenerico ? null : {
+          nombre:   datos.clienteNombre,
+          telefono: datos.clienteTelefono
+        }
+      }));
+
+      stopLoading();
+      playSoundOnce(SOUNDS.caja);
+      alertOk('Venta registrada', 'La venta quedó guardada y entra en los balances del día.');
+    } catch (e) {
+      stopLoading();
+      alertErr('Error al registrar', e.message);
+    }
+  },
+
+  desenganchar() {
+    if (this._unsubConfig) { this._unsubConfig(); this._unsubConfig = null; }
+  },
+
+  setupListeners() { /* binds se hacen en render()/modal */ }
+};
+
+/* ============================================================
    INICIALIZACIÓN
    ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
