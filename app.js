@@ -2364,6 +2364,7 @@ abrirPedidoExistente(pedidoId, mesaId) {
         }
         return { id, ...it };
       })
+      .filter(it => !it.cancelado)
       .sort((a, b) => String(a.fechaPedido).localeCompare(String(b.fechaPedido)));
 
     if (!itemsArr.length) {
@@ -3011,17 +3012,25 @@ abrirModalProducto(producto, initial) {
       if (!r.isConfirmed) return;
       motivo = r.value;
    }
-    // Sin confirmar previo si no requiere motivo: tap único → optimistic UI.
-    // El ítem queda tachado en pantalla, ese es el feedback.
-
-    this.optimistas[itemId] = { cancelado: true };
+   // Optimistic UI: quitamos el ítem de la lista YA (sin tacharlo) y
+    // ajustamos los totales. Si el POST falla, lo restauramos.
+    const itemPrev     = { ...it };
+    const subtotalPrev = Number(it.subtotal) || 0;
+    delete this.optimistas[itemId];      // por si tenía override previo
+    delete p.items[itemId];
+    const meta = p.meta || (p.meta = {});
+    meta.subtotal = (Number(meta.subtotal) || 0) - subtotalPrev;
+    meta.total    = meta.subtotal - (Number(meta.descuentoValor) || 0);
     this.renderDetalle();
 
     try {
       await apiPost('cancelarItem', withUser({ itemId, motivo }));
-       // El listener RTDB confirma y limpia el override
+      // El backend borra la fila; el listener RTDB llega sin el ítem.
     } catch (e) {
-      delete this.optimistas[itemId];
+      // Revertir: devolver el ítem y los totales
+      p.items[itemId] = itemPrev;
+      meta.subtotal = (Number(meta.subtotal) || 0) + subtotalPrev;
+      meta.total    = meta.subtotal - (Number(meta.descuentoValor) || 0);
       this.renderDetalle();
       alertErr('Error', e.message);
     }
