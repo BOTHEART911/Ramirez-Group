@@ -5957,3 +5957,18 @@ img.brand[alt="Banner"] {
   border-radius: var(--r-pill);
 }
 .cred-venta__cambiar:hover { background: var(--primary); color: #fff; }
+
+/* ============================================================
+   AJUSTE 3 — VISTA VENTAS (registro extemporáneo)
+   ============================================================ */
+.ventas-intro { text-align: center; max-width: 520px; }
+.ventas-intro__icon {
+  font-size: 3rem;
+  margin-bottom: 6px;
+}
+.ventas-intro h3 {
+  font-family: var(--font-display);
+  color: var(--primary);
+  margin-bottom: 8px;
+}
+.ventas-intro p { font-size: 0.88rem; line-height: 1.5; }
