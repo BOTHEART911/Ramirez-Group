@@ -507,6 +507,14 @@ textarea { resize: vertical; min-height: 80px; }
   opacity: 0.6;
 }
 
+.app-version-line {
+  text-align: center;
+  margin-top: 24px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
 /* ============================================================
    INSTALAR PWA
    ============================================================ */
