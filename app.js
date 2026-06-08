@@ -456,15 +456,12 @@ async function checkVersion() {
     const serverVersion = String(j.version || '').trim();
     if (!serverVersion) return;
 
-// Primera lectura: guardar la versión actual y pintarla en todos los spans
+  // Primera lectura: guardar la versión y pintarla en todos los letreros
     if (!APP_VERSION_LOADED) {
       APP_VERSION_LOADED = serverVersion;
-      const numEl1 = $('#app-version-number');
-      const numEl2 = $('#app-version-number-2');
-      const numEl3 = $('#app-version-number-3');
-      if (numEl1) numEl1.textContent = 'Versión ' + serverVersion;
-      if (numEl2) numEl2.textContent = 'Versión ' + serverVersion;
-      if (numEl3) numEl3.textContent = 'Versión ' + serverVersion;
+      document.querySelectorAll('.app-version-line').forEach(el => {
+        el.textContent = 'Versión ' + serverVersion;
+      });
       return;
     }
 
