@@ -54,7 +54,8 @@ const ICONOS = {
   excel:      'https://res.cloudinary.com/dqqeavica/image/upload/v1778186304/excel_rkcld6.webp',
   luna:       'https://res.cloudinary.com/dqqeavica/image/upload/v1778186305/luna_mfjvx6.webp',
   mesero:     'https://res.cloudinary.com/dqqeavica/image/upload/v1778186305/mesero_fs2r5u.webp',
- bot:        'https://res.cloudinary.com/dqqeavica/image/upload/v1780053848/heartsync_ojmqxm.gif'
+ bot:        'https://res.cloudinary.com/dqqeavica/image/upload/v1780053848/heartsync_ojmqxm.gif',
+   factura:    'https://res.cloudinary.com/dqqeavica/image/upload/v1780880779/factura_mhggpz.webp'
 };
 
 const PLACEHOLDER_PRODUCTO = 'https://res.cloudinary.com/dqqeavica/image/upload/v1778186302/plato_cmnvge.webp';
@@ -156,7 +157,11 @@ function _minutosAhora() {
   return d.getHours() * 60 + d.getMinutes();
 }
 
-async function meseroDentroDeHorario() {
+async function meseroDentroDeHorario(graciaMin) {
+  // graciaMin: minutos extra DESPUÉS del cierre en que aún se permite operar
+  // (0 para MESERO, 60 para ADMINISTRADOR). Default 0.
+  const gracia = Number(graciaMin) || 0;
+
   // Leer FRESCO desde getConfig (que sí normaliza la hora a HH:mm).
   // NO usar Config.get(): su caché viene de Firebase con la hora sin normalizar.
   let cfg = {};
@@ -169,14 +174,32 @@ async function meseroDentroDeHorario() {
   const apStr = _soloHHMM(cfg.RESTAURANTE_HORA_APERTURA, '11:00');
   const ciStr = _soloHHMM(cfg.RESTAURANTE_HORA_CIERRE,   '22:00');
   const ap  = _minutosHHMM(apStr);
-  const ci  = _minutosHHMM(ciStr);
+  let   ci  = _minutosHHMM(ciStr);
   const now = _minutosAhora();
 
   // Si por alguna razón no se pudo leer, NO bloqueamos (mejor dejar trabajar).
   if (ap == null || ci == null) return { dentro: true, apertura: apStr, cierre: ciStr };
 
+  // Cierre efectivo con los minutos de gracia del rol (ej. ADMIN: cierre + 60)
+  const ciEfectivo = ci + gracia;
+
   // Cierre <= apertura => el turno cruza medianoche (ej. 18:00 → 02:00)
-  const dentro = (ci > ap) ? (now >= ap && now < ci) : (now >= ap || now < ci);
+  // El cierre efectivo puede superar 1440 (medianoche) por la gracia; lo
+  // normalizamos comparando en minutos del día con manejo de cruce.
+  let dentro;
+  if (ciEfectivo > ap) {
+    // Mismo día (o cruce empujado por la gracia hacia el día siguiente)
+    if (ciEfectivo < 1440) {
+      dentro = (now >= ap && now < ciEfectivo);
+    } else {
+      // La gracia empujó el cierre pasada la medianoche
+      dentro = (now >= ap) || (now < (ciEfectivo - 1440));
+    }
+  } else {
+    // Turno que cruza medianoche desde el cierre base (ej. 18:00 → 02:00)
+    dentro = (now >= ap || now < ciEfectivo);
+  }
+
   return { dentro, apertura: apStr, cierre: ciStr };
 }
 
@@ -208,12 +231,19 @@ function _avisoMeseroFueraHorario(apertura, cierre) {
 }
 
 /* Compuerta: true si puede operar; false (y muestra aviso) si está fuera.
-   Solo restringe a MESERO; cualquier otro rol pasa siempre. */
+   Restringe a MESERO (sin gracia) y a ADMINISTRADOR (con 60 min de gracia
+   tras el cierre). Cualquier otro rol pasa siempre. */
 async function meseroPuedeOperar() {
-  if (!rolEs('MESERO')) return true;
+  const esMesero = rolEs('MESERO');
+  const esAdmin  = rolEs('ADMINISTRADOR');
+  if (!esMesero && !esAdmin) return true;
+
+  // ADMINISTRADOR tiene 60 minutos extra después del cierre; MESERO no.
+  const graciaMin = esAdmin ? 60 : 0;
+
   startLoading();
   let r;
-  try { r = await meseroDentroDeHorario(); }
+  try { r = await meseroDentroDeHorario(graciaMin); }
   finally { stopLoading(); }
   if (r.dentro) return true;
   await _avisoMeseroFueraHorario(r.apertura, r.cierre);
@@ -702,6 +732,12 @@ function irAMenuRestaurante() {
       roles: ['SUPERUSUARIO','ADMINISTRADOR','CAJA'],
       view: 'caja'
     },
+     {
+      key: 'ventas', titulo: 'Ventas', desc: 'Registro extemporáneo',
+      icono: ICONOS.factura,
+      roles: ['SUPERUSUARIO','ADMINISTRADOR','CAJA'],
+      view: 'ventas'
+    },
     {
       key: 'catalogo', titulo: 'Catálogo', desc: 'Productos y precios',
       icono: ICONOS.plato,
@@ -789,9 +825,10 @@ function irAMenuRestaurante() {
   tile.addEventListener('click', async () => {
       playSoundOnce(SOUNDS.click);
       // Segundo punto de control: MESERO no entra a Tomar pedido / Catálogo fuera de horario
-      if (rolEs('MESERO') && (t.view === 'tomar-pedido' || t.view === 'catalogo')) {
-        if (!(await meseroPuedeOperar())) return;
-      }
+    if ((rolEs('MESERO') || rolEs('ADMINISTRADOR')) &&
+    (t.view === 'tomar-pedido' || t.view === 'catalogo')) {
+  if (!(await meseroPuedeOperar())) return;
+}
       if (t.view === 'pendiente') {
         $('#pendiente-title').textContent = t.placeholder;
         $('#pendiente-h2').textContent = t.placeholder;
@@ -808,6 +845,8 @@ function irAMenuRestaurante() {
         Comanda.abrir();
      } else if (t.view === 'caja') {
         Caja.abrir();
+      } else if (t.view === 'ventas') {
+        Ventas.abrir();
       } else if (t.view === 'anclaje') {
         Anclaje.abrir();
       } else if (t.view === 'usuarios') {
@@ -861,6 +900,7 @@ document.addEventListener('click', (e) => {
     // Si veníamos de Comanda, desenganchar listener + cronómetro
   if (typeof Comanda !== 'undefined') Comanda.desenganchar();
     if (typeof Caja    !== 'undefined') Caja.desenganchar();
+   if (typeof Ventas !== 'undefined') Ventas.desenganchar();
     if (typeof Anclaje !== 'undefined') Anclaje.desenganchar();
     if (typeof Usuarios !== 'undefined') Usuarios.desenganchar();
    if (typeof Auditoria !== 'undefined') Auditoria.desenganchar();
@@ -9601,4 +9641,6 @@ window.addEventListener('DOMContentLoaded', () => {
    Bot.setupListeners();
     // Fase 8
   Creditos.setupListeners();
+   // Ajuste 3
+  Ventas.setupListeners();
 });
