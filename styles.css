@@ -2158,6 +2158,9 @@ img.brand[alt="Banner"] {
 }
 @media (min-width: 720px) {
   .kanban { grid-template-columns: repeat(3, 1fr); }
+  .kanban-col {
+    height: calc(100dvh - 140px);   /* alto fijo: cada columna scrollea sola */
+  }
 }
 
 .kanban-col {
@@ -2177,6 +2180,7 @@ img.brand[alt="Banner"] {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-soft);
+    flex-shrink: 0;
 }
 .kanban-col__head h3 {
   font-family: var(--font-display);
@@ -2201,6 +2205,10 @@ img.brand[alt="Banner"] {
   flex-direction: column;
   gap: 10px;
   flex: 1;
+  min-height: 0;                      /* permite que el body se encoja y haga scroll */
+  overflow-y: auto;                   /* scroll propio de cada columna */
+  -webkit-overflow-scrolling: touch;  /* desplazamiento suave en táctil (iOS) */
+  overscroll-behavior: contain;       /* el scroll no se "escapa" a la página */
 }
 .kanban-col__empty {
   text-align: center;
