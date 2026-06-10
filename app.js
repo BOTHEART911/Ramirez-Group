@@ -5406,6 +5406,7 @@ SECCIONES: [
       '{descuentoLinea}\n' +
       '💰 *TOTAL:* {total}\n' +
       '💳 Método: {metodo}\n' +
+      '{propina}\n' +
       '{ticketLink}\n' +
       '{comprobante}\n\n' +
       '💚 Te esperamos pronto. Para cualquier comentario, escríbenos a este mismo número.\n' +
@@ -5477,7 +5478,7 @@ SECCIONES: [
      WA_TEMPLATE_CREDITO_VENTA:
       '🧾 *{razonSocial}*\n\n' +
       '¡Hola {cliente}! Registramos tu pedido a crédito:\n\n' +
-      '🍽️ {cantidad} × {momento} — {valorUnidad} c/u\n' +
+      '{items}\n' +
       '💰 *Total de esta compra:* {total}\n\n' +
       '━━━━━━━━━━━━━━━━━\n' +
       '📊 *Tu deuda actual:* {saldo}\n' +
@@ -5508,7 +5509,8 @@ PREVIEW_DATA: {
     cliente: 'Juan', razonSocial: 'Restaurante y Pescadería Ramírez',
     direccion: 'Calle 1 # 23-45, Bogotá',
     total: '$ 85.000', metodo: 'EFECTIVO',
-    items: '2× BANDEJA DE TILAPIA            $ 70.000\n1× CERVEZA                       $ 15.000',
+    items: '▸ 2 x BANDEJA DE TILAPIA\n*$ 70.000*\n▸ 1 x CERVEZA\n*$ 15.000*',
+    propina: '❤️ ¡Gracias por tu propina de *$ 8.500*!',
     descuentoLinea: '',
     ticketLink: '🧾 *Ver tu ticket completo:*\nhttps://...',
     comprobante: '',
