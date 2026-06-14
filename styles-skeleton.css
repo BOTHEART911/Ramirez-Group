@@ -1,0 +1,59 @@
+.sk-wrap { display:flex; flex-direction:column; gap:12px; margin-top:14px; }
+ 
+.sk-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  box-shadow: var(--sh-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sk-box--dark {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-2) 100%);
+  border: 0;
+}
+ 
+/* Pieza base con brillo */
+.sk {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-soft);
+  border-radius: 8px;
+}
+.sk-box--dark .sk { background: rgba(255, 255, 255, 0.15); }
+.sk::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.55) 50%, transparent 100%);
+  animation: skShimmer 1.4s infinite;
+}
+.sk-box--dark .sk::after {
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.22) 50%, transparent 100%);
+}
+@keyframes skShimmer { 100% { transform: translateX(100%); } }
+ 
+/* Formas reutilizables */
+.sk-row    { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.sk-line   { height:13px; width:100%; }
+.sk-line--80 { width:80%; }
+.sk-line--60 { width:60%; }
+.sk-line--40 { width:40%; }
+.sk-title  { height:22px; width:55%; }
+.sk-num    { height:32px; width:58px; }
+.sk-pill   { height:18px; width:84px; border-radius:var(--r-pill); }
+.sk-total  { height:26px; width:120px; }
+.sk-btn    { height:34px; width:90px; border-radius:var(--r-md); }
+.sk-circle { width:46px; height:46px; border-radius:50%; flex-shrink:0; }
+.sk-bar    { height:14px; border-radius:7px; }
+.sk-foot   { display:flex; align-items:center; justify-content:space-between; gap:10px; padding-top:12px; border-top:1px dashed var(--border); }
+.sk-grow   { flex:1; min-width:0; }
+.sk-kpis   { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+ 
+/* Respeto a "reducir movimiento" */
+@media (prefers-reduced-motion: reduce) {
+  .sk::after { animation: none; }
+}
