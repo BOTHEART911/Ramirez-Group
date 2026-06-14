@@ -1,0 +1,45 @@
+/* Desactiva el "recargar página" nativo del navegador en Android,
+   para que el nuestro (que solo recarga los datos) tome el control. */
+html, body { overscroll-behavior-y: contain; }
+ 
+/* Indicador circular que baja desde arriba */
+#ptr {
+  position: fixed;
+  top: 6px;
+  left: 50%;
+  z-index: 120;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  box-shadow: var(--sh-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-50%) translateY(-64px);
+}
+/* Cuando dejamos que vuelva o gire, activamos transición suave */
+#ptr.ptr--anim {
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s;
+}
+ 
+/* El anillo que gira */
+.ptr__ring {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 3px solid var(--primary-soft);
+  border-top-color: var(--primary);
+}
+/* Listo para soltar: el anillo cambia a dorado */
+#ptr.ptr--ready .ptr__ring { border-top-color: var(--accent); }
+/* Recargando: gira */
+#ptr.ptr--loading .ptr__ring { animation: ptrSpin 0.7s linear infinite; }
+ 
+@keyframes ptrSpin { to { transform: rotate(360deg); } }
+ 
+@media (prefers-reduced-motion: reduce) {
+  #ptr.ptr--loading .ptr__ring { animation-duration: 1.4s; }
+}
