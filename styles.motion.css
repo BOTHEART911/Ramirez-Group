@@ -1,0 +1,344 @@
+/* ============================================================
+   1. TOKENS DE MOVIMIENTO
+   Curvas que imitan la física nativa (resorte, desaceleración).
+   ============================================================ */
+:root {
+  /* Resorte con sobre-rebote — para presiones y entradas con vida */
+  --ease-spring:   cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* Desaceleración rápida y limpia — para hover y deslizamientos */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Suave en ambos extremos — para transiciones de estado */
+  --ease-smooth:   cubic-bezier(0.65, 0, 0.35, 1);
+ 
+  --dur-fast:   0.18s;
+  --dur-base:   0.28s;
+  --dur-slow:   0.42s;
+}
+ 
+/* ============================================================
+   2. ENTRADA DE PANTALLA (deslizamiento + desvanecido)
+   Reemplaza el fade plano por un movimiento con profundidad,
+   parecido a la navegación nativa entre pantallas.
+   ============================================================ */
+.view.active {
+  animation: viewSlideIn var(--dur-slow) var(--ease-out-expo);
+}
+@keyframes viewSlideIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);     }
+}
+ 
+/* ============================================================
+   3. BOTONES — presión con resorte
+   El truco nativo: al tocar, el botón se hunde y rebota.
+   ============================================================ */
+.btn {
+  transition: transform var(--dur-fast) var(--ease-spring),
+              box-shadow var(--dur-base) var(--ease-out-expo),
+              background var(--dur-base) var(--ease-out-expo),
+              color var(--dur-base) var(--ease-out-expo);
+}
+.btn:hover  { transform: translateY(-1px); }
+.btn:active { transform: scale(0.95) translateY(0); }
+ 
+.btn-primary:hover { box-shadow: 0 8px 24px rgba(6, 64, 43, 0.40); }
+.btn-accent:hover  { box-shadow: 0 8px 24px rgba(194, 121, 42, 0.40); }
+.btn-success:hover { box-shadow: 0 8px 24px rgba(22, 163, 74, 0.40); }
+ 
+/* ============================================================
+   4. TARJETAS — hover y presión con física
+   Suben con resorte al pasar el dedo, se hunden al tocar.
+   Cubre todas las tarjetas táctiles de la app.
+   ============================================================ */
+.business-card,
+.menu-tile,
+.mesa-tile,
+.mesa-cfg-card,
+.prod-card,
+.pc-prod,
+.caja-card,
+.cred-card,
+.res-card,
+.usr-card,
+.inv-row,
+.anc-hist-row,
+.comp-thumb,
+.bal-mesero {
+  transition: transform var(--dur-base) var(--ease-spring),
+              box-shadow var(--dur-base) var(--ease-out-expo),
+              border-color var(--dur-base) var(--ease-out-expo);
+  will-change: transform;
+}
+.business-card:active,
+.menu-tile:active,
+.mesa-tile:active,
+.mesa-cfg-card:active,
+.prod-card:active,
+.pc-prod:active,
+.caja-card:active,
+.cred-card:active,
+.res-card:active,
+.usr-card:active,
+.comp-thumb:active,
+.bal-mesero:active {
+  transform: scale(0.96);
+}
+ 
+/* Tiles del menú y mesas: hover un poco más expresivo */
+.menu-tile:hover,
+.mesa-tile:hover {
+  transform: translateY(-4px) scale(1.02);
+}
+ 
+/* ============================================================
+   5. FAB — entrada con resorte + presión
+   El botón flotante "aparece" rebotando, como en apps nativas.
+   ============================================================ */
+.fab {
+  animation: fabIn var(--dur-slow) var(--ease-spring);
+  transition: transform var(--dur-base) var(--ease-spring),
+              box-shadow var(--dur-base) var(--ease-out-expo);
+}
+.fab:active { transform: scale(0.88) rotate(8deg); }
+@keyframes fabIn {
+  from { opacity: 0; transform: scale(0.2) translateY(20px); }
+  to   { opacity: 1; transform: scale(1)   translateY(0);    }
+}
+ 
+/* ============================================================
+   6. TECLADO PIN — cada tecla rebota al tocar
+   ============================================================ */
+.pin-key {
+  transition: transform var(--dur-fast) var(--ease-spring),
+              background var(--dur-fast) var(--ease-out-expo),
+              color var(--dur-fast) var(--ease-out-expo);
+}
+.pin-key:active { transform: scale(0.88); }
+ 
+.pin-dot {
+  transition: transform var(--dur-base) var(--ease-spring),
+              background var(--dur-base) var(--ease-out-expo),
+              border-color var(--dur-base) var(--ease-out-expo);
+}
+.pin-dot.filled { transform: scale(1.25); }
+ 
+/* ============================================================
+   7. PESTAÑAS Y TOGGLES — deslizamiento suave del estado activo
+   ============================================================ */
+.login-tab,
+.res-vista-toggle__btn,
+.cobro__metodo,
+.cred-venta__tipo-btn,
+.cred-venta__mom-btn,
+.aud-chip,
+.res-pill {
+  transition: background var(--dur-base) var(--ease-smooth),
+              color var(--dur-base) var(--ease-smooth),
+              border-color var(--dur-base) var(--ease-smooth),
+              box-shadow var(--dur-base) var(--ease-out-expo),
+              transform var(--dur-fast) var(--ease-spring);
+}
+.login-tab:active,
+.res-vista-toggle__btn:active,
+.cobro__metodo:active,
+.aud-chip:active,
+.res-pill:active { transform: scale(0.96); }
+ 
+/* ============================================================
+   8. MODALES (SweetAlert) — pop con resorte
+   El modal "salta" al aparecer en vez de hacer un fade plano,
+   que es exactamente lo que sienten las apps nativas.
+   ============================================================ */
+.swal2-popup.swal2-show {
+  animation: swalPop var(--dur-base) var(--ease-spring) !important;
+}
+@keyframes swalPop {
+  from { opacity: 0; transform: scale(0.82) translateY(12px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0);    }
+}
+.swal2-popup.swal2-hide {
+  animation: swalOut var(--dur-fast) var(--ease-out-expo) !important;
+}
+@keyframes swalOut {
+  from { opacity: 1; transform: scale(1);    }
+  to   { opacity: 0; transform: scale(0.92); }
+}
+ 
+/* Toasts (esquina superior): entran deslizándose con rebote */
+.swal2-toast.swal2-show {
+  animation: toastIn var(--dur-base) var(--ease-spring) !important;
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(-16px) scale(0.9); }
+  to   { opacity: 1; transform: translateY(0)     scale(1);   }
+}
+ 
+/* ============================================================
+   9. ENTRADA ESCALONADA DE LISTAS
+   Las tarjetas de cada grilla "caen" una tras otra, no todas
+   de golpe. Detalle pequeño que se ve muy profesional.
+   Se aplica a los hijos directos de las grillas principales.
+   ============================================================ */
+.business-grid > *,
+.menu-grid > *,
+.mesa-tiles-grid > *,
+.mesas-grid > *,
+.caja-list > *,
+.cred-list > *,
+.usr-list > * {
+  animation: cardRise var(--dur-base) var(--ease-out-expo) backwards;
+}
+@keyframes cardRise {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+/* Retardo creciente: cada tarjeta entra 45ms después de la anterior */
+.business-grid > *:nth-child(1),  .menu-grid > *:nth-child(1),
+.mesa-tiles-grid > *:nth-child(1),.mesas-grid > *:nth-child(1),
+.caja-list > *:nth-child(1),      .cred-list > *:nth-child(1),
+.usr-list > *:nth-child(1)  { animation-delay: 0.00s; }
+.business-grid > *:nth-child(2),  .menu-grid > *:nth-child(2),
+.mesa-tiles-grid > *:nth-child(2),.mesas-grid > *:nth-child(2),
+.caja-list > *:nth-child(2),      .cred-list > *:nth-child(2),
+.usr-list > *:nth-child(2)  { animation-delay: 0.045s; }
+.business-grid > *:nth-child(3),  .menu-grid > *:nth-child(3),
+.mesa-tiles-grid > *:nth-child(3),.mesas-grid > *:nth-child(3),
+.caja-list > *:nth-child(3),      .cred-list > *:nth-child(3),
+.usr-list > *:nth-child(3)  { animation-delay: 0.09s; }
+.business-grid > *:nth-child(4),  .menu-grid > *:nth-child(4),
+.mesa-tiles-grid > *:nth-child(4),.mesas-grid > *:nth-child(4),
+.caja-list > *:nth-child(4),      .cred-list > *:nth-child(4),
+.usr-list > *:nth-child(4)  { animation-delay: 0.135s; }
+.business-grid > *:nth-child(5),  .menu-grid > *:nth-child(5),
+.mesa-tiles-grid > *:nth-child(5),.mesas-grid > *:nth-child(5),
+.caja-list > *:nth-child(5),      .cred-list > *:nth-child(5),
+.usr-list > *:nth-child(5)  { animation-delay: 0.18s; }
+.business-grid > *:nth-child(6),  .menu-grid > *:nth-child(6),
+.mesa-tiles-grid > *:nth-child(6),.mesas-grid > *:nth-child(6),
+.caja-list > *:nth-child(6),      .cred-list > *:nth-child(6),
+.usr-list > *:nth-child(6)  { animation-delay: 0.225s; }
+.business-grid > *:nth-child(7),  .menu-grid > *:nth-child(7),
+.mesa-tiles-grid > *:nth-child(7),.mesas-grid > *:nth-child(7) { animation-delay: 0.27s; }
+.business-grid > *:nth-child(8),  .menu-grid > *:nth-child(8),
+.mesa-tiles-grid > *:nth-child(8),.mesas-grid > *:nth-child(8) { animation-delay: 0.315s; }
+/* A partir de la 9 entran juntas para no demorar demasiado */
+.menu-grid > *:nth-child(n+9),
+.mesa-tiles-grid > *:nth-child(n+9),
+.mesas-grid > *:nth-child(n+9) { animation-delay: 0.36s; }
+ 
+/* ============================================================
+   10. ÍTEMS DEL PEDIDO — entran deslizándose desde la izquierda
+   ============================================================ */
+.pd-item {
+  animation: itemSlideIn var(--dur-base) var(--ease-out-expo) backwards;
+}
+@keyframes itemSlideIn {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0);     }
+}
+ 
+/* Tarjetas de cocina: entran con un pequeño "pop" */
+.cmd-card {
+  animation: cmdPop var(--dur-base) var(--ease-spring) backwards;
+}
+@keyframes cmdPop {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1);    }
+}
+ 
+/* ============================================================
+   11. SKELETON DE CARGA (reemplazo opcional del spinner)
+   Más moderno que un spinner: bloques grises que "brillan".
+   Para usarlo, en vez de pintar el spinner pinta divs con la
+   clase .skeleton (ejemplo de uso comentado abajo).
+   ============================================================ */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-soft);
+  border-radius: var(--r-md);
+}
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.55) 50%,
+    transparent 100%
+  );
+  animation: shimmer 1.4s infinite;
+}
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+/* Tamaños rápidos de skeleton */
+.skeleton-line  { height: 14px; margin: 8px 0; }
+.skeleton-title { height: 22px; width: 60%; margin: 10px 0; }
+.skeleton-card  { height: 90px; margin: 10px 0; }
+/*
+  Ejemplo de uso en JS (opcional), dentro de pintarLoading():
+    cont.innerHTML = `
+      <div class="skeleton skeleton-card"></div>
+      <div class="skeleton skeleton-card"></div>
+      <div class="skeleton skeleton-card"></div>`;
+*/
+ 
+/* ============================================================
+   12. WELCOME BAR — entra desde arriba con resorte
+   ============================================================ */
+.welcome-bar {
+  animation: welcomeDrop var(--dur-slow) var(--ease-spring);
+}
+@keyframes welcomeDrop {
+  from { opacity: 0; transform: translateY(-18px); }
+  to   { opacity: 1; transform: translateY(0);     }
+}
+ 
+/* ============================================================
+   13. ENLACES DEL HEADER E ICONOS — presión suave
+   ============================================================ */
+.app-header__back,
+.app-header__icon,
+.app-header__user,
+.welcome-bar__logout,
+.cred-cli__edit,
+.mesa-cfg-card__edit,
+.prod-action {
+  transition: transform var(--dur-fast) var(--ease-spring),
+              background var(--dur-fast) var(--ease-out-expo),
+              color var(--dur-fast) var(--ease-out-expo);
+}
+.app-header__back:active,
+.app-header__icon:active,
+.app-header__user:active,
+.welcome-bar__logout:active,
+.cred-cli__edit:active,
+.prod-action:active { transform: scale(0.9); }
+ 
+/* ============================================================
+   14. ACORDEONES — el cuerpo se despliega suave
+   (el chevron ya rota en tu CSS; aquí suavizamos la apertura)
+   ============================================================ */
+.cat-acordeon__chevron,
+.cfg-section__chevron {
+  transition: transform var(--dur-base) var(--ease-spring);
+}
+ 
+/* ============================================================
+   15. RESPETO A "REDUCIR MOVIMIENTO" (accesibilidad)
+   Si el usuario activó esta opción en su teléfono, apagamos
+   las animaciones. Es la marca de una app bien hecha.
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
