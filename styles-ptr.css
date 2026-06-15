@@ -1,8 +1,12 @@
-/* Desactiva el "recargar página" nativo del navegador en Android,
-   para que el nuestro (que solo recarga los datos) tome el control. */
-html, body { overscroll-behavior-y: contain; }
- 
-/* Indicador circular que baja desde arriba */
+/* ============================================================
+ *  RAMÍREZ GROUP · styles-ptr.css
+ *  Estilos del indicador de "jalar para recargar".
+ *  ----------------------------------------------------------
+ *  Instalar:  <link rel="stylesheet" href="./styles-ptr.css" />
+ *             (en el <head>, después de styles.css)
+ *  Pareja:    ptr.js  (van juntos)
+ *  No modifica los archivos originales · Reversible (borra la línea)
+ * ============================================================ */
 #ptr {
   position: fixed;
   top: 6px;
