@@ -1,3 +1,15 @@
+/* ============================================================
+ *  RAMÍREZ GROUP · sound-engine.js
+ *  Precarga los sonidos al abrir la app y los reproduce al
+ *  instante (reemplaza playSoundOnce), eliminando el retardo y
+ *  alineándolos con la vibración. Usa Web Audio API.
+ *  ----------------------------------------------------------
+ *  Instalar:  <script src="./sound-engine.js"></script>
+ *             (al final, después de app.js)
+ *  Pareja:    — (solo JS)
+ *  No modifica los archivos originales · Reversible (borra la línea)
+ * ============================================================ */
+
 (function () {
   'use strict';
  
