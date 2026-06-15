@@ -1,3 +1,14 @@
+/* ============================================================
+ *  RAMÍREZ GROUP · modal-stagger.js
+ *  El contenido de las ventanas (alertas) entra escalonado:
+ *  primero el título, luego los elementos, luego los botones.
+ *  ----------------------------------------------------------
+ *  Instalar:  <script src="./modal-stagger.js"></script>
+ *             (al final, después de app.js)
+ *  Pareja:    — (solo JS, usa Web Animations API)
+ *  No modifica los archivos originales · Reversible (borra la línea)
+ *  Respeta "reducir movimiento" del sistema
+ * ============================================================ */
 
 (function () {
   'use strict';
