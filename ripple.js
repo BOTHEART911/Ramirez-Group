@@ -1,3 +1,15 @@
+/* ============================================================
+ *  RAMÍREZ GROUP · ripple.js
+ *  Onda de tinta al tocar (estilo Android) en botones, tarjetas,
+ *  teclado PIN y accesos.
+ *  ----------------------------------------------------------
+ *  Instalar:  <script src="./ripple.js"></script>
+ *             (al final, después de app.js)
+ *  Pareja:    styles-ripple.css  (NECESARIA)
+ *  No modifica los archivos originales · Reversible (borra la línea)
+ *  Respeta "reducir movimiento" del sistema
+ * ============================================================ */
+
 (function () {
   'use strict';
  
