@@ -1,7 +1,17 @@
 /* ============================================================
-   1. TOKENS DE MOVIMIENTO
-   Curvas que imitan la física nativa (resorte, desaceleración).
-   ============================================================ */
+ *  RAMÍREZ GROUP · styles-motion.css
+ *  Micro-efectos base (15 bloques): presión con resorte en
+ *  botones/tarjetas/FAB/PIN, pestañas y toggles, aparición de
+ *  pantallas, "pop" de modales, listas escalonadas, brillo de
+ *  esqueletos y barra de bienvenida. Autónomo (no necesita JS).
+ *  ----------------------------------------------------------
+ *  Instalar:  <link rel="stylesheet" href="./styles-motion.css" />
+ *             (en el <head>, después de styles.css)
+ *  Pareja:    — (autónomo)
+ *  No modifica los archivos originales · Reversible (borra la línea)
+ *  Respeta "reducir movimiento" del sistema
+ * ============================================================ */
+
 :root {
   /* Resorte con sobre-rebote — para presiones y entradas con vida */
   --ease-spring:   cubic-bezier(0.34, 1.56, 0.64, 1);
