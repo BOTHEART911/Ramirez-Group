@@ -1,3 +1,15 @@
+/* ============================================================
+ *  RAMÍREZ GROUP · skeletons.js
+ *  Reemplaza el "girador" de carga de las LISTAS por esqueletos
+ *  (siluetas grises) en Anclaje, Auditoría, Balances, Reservas
+ *  y Créditos. NO toca el girador global de guardar/cobrar/login.
+ *  ----------------------------------------------------------
+ *  Instalar:  <script src="./skeletons.js"></script>
+ *             (al final, después de app.js)
+ *  Pareja:    styles-skeleton.css  (NECESARIA)
+ *  No modifica los archivos originales · Reversible (borra la línea)
+ * ============================================================ */
+
 (function () {
   'use strict';
  
