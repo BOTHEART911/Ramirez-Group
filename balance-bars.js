@@ -1,3 +1,14 @@
+/* ============================================================
+ *  RAMÍREZ GROUP · balance-bars.js
+ *  Las barras del dashboard de Balances crecen desde cero, en
+ *  cascada, cada vez que entras o recargas la vista.
+ *  ----------------------------------------------------------
+ *  Instalar:  <script src="./balance-bars.js"></script>
+ *             (al final, después de app.js)
+ *  Pareja:    — (solo JS)
+ *  No modifica los archivos originales · Reversible (borra la línea)
+ *  Respeta "reducir movimiento" del sistema
+ * ============================================================ */
 
 (function () {
   'use strict';
