@@ -1,7 +1,13 @@
+/* ============================================================
+ *  RAMÍREZ GROUP · styles-ripple.css
+ *  Estilos de la onda de tinta al tocar.
+ *  ----------------------------------------------------------
+ *  Instalar:  <link rel="stylesheet" href="./styles-ripple.css" />
+ *             (en el <head>, después de styles.css)
+ *  Pareja:    ripple.js  (van juntos)
+ *  No modifica los archivos originales · Reversible (borra la línea)
+ * ============================================================ */
 
-/* El JS marca con esta clase los elementos que reciben onda.
-   position:relative + overflow:hidden son necesarios para que
-   el círculo se recorte dentro del botón. */
 .ripple-host {
   position: relative;
   overflow: hidden;
