@@ -1,3 +1,16 @@
+/* ============================================================
+ *  RAMÍREZ GROUP · haptics.js
+ *  Vibración al tocar botones, tarjetas y teclado PIN, y según
+ *  el resultado de las alertas (éxito / error / aviso).
+ *  OJO: solo Android. El iPhone bloquea la vibración por web;
+ *  se detecta y se ignora sin romper nada. Expone window.Haptic.
+ *  ----------------------------------------------------------
+ *  Instalar:  <script src="./haptics.js"></script>
+ *             (al final, después de app.js)
+ *  Pareja:    — (solo JS)
+ *  No modifica los archivos originales · Reversible (borra la línea)
+ * ============================================================ */
+
 (function () {
   'use strict';
  
