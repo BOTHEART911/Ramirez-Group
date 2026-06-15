@@ -1,3 +1,15 @@
+/* ============================================================
+ *  RAMÍREZ GROUP · transitions.js
+ *  Transición lateral entre pantallas (estilo iOS): la nueva
+ *  entra desde la derecha; "atrás" entra desde la izquierda.
+ *  ----------------------------------------------------------
+ *  Instalar:  <script src="./transitions.js"></script>
+ *             (al final, después de app.js)
+ *  Pareja:    styles-transition.css  (NECESARIA)
+ *  No modifica los archivos originales · Reversible (borra la línea)
+ *  Respeta "reducir movimiento" del sistema
+ * ============================================================ */
+
 (function () {
   'use strict';
  
