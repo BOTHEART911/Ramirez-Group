@@ -1,3 +1,14 @@
+/* ============================================================
+ *  RAMÍREZ GROUP · counter.js
+ *  Los totales que cambian (subtotal y total de Tomar pedido,
+ *  héroe de Créditos, KPI de Balances) cuentan animados del
+ *  valor viejo al nuevo.
+ *  ----------------------------------------------------------
+ *  Instalar:  <script src="./counter.js"></script>
+ *             (al final, después de app.js)
+ *  Pareja:    — (solo JS)
+ *  No modifica los archivos originales · Reversible (borra la línea)
+ * ============================================================ */
 
 (function () {
   'use strict';
