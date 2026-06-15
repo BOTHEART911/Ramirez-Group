@@ -1,3 +1,14 @@
+/* ============================================================
+ *  RAMÍREZ GROUP · ptr.js
+ *  "Jalar para recargar" (pull-to-refresh) en las pantallas de
+ *  lista, como una app nativa. Solo táctil.
+ *  ----------------------------------------------------------
+ *  Instalar:  <script src="./ptr.js"></script>
+ *             (al final, después de app.js)
+ *  Pareja:    styles-ptr.css  (NECESARIA)
+ *  No modifica los archivos originales · Reversible (borra la línea)
+ * ============================================================ */
+
 (function () {
   'use strict';
  
