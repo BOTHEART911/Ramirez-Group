@@ -1,14 +1,25 @@
+/* ============================================================
+ *  RAMÍREZ GROUP · styles-transition.css
+ *  Estilos de la transición lateral entre pantallas (estilo iOS):
+ *  la pantalla nueva entra desde la derecha; "atrás", desde la izquierda.
+ *  ----------------------------------------------------------
+ *  Instalar:  <link rel="stylesheet" href="./styles-transition.css" />
+ *             (en el <head>, después de styles-motion.css)
+ *  Pareja:    transitions.js  (van juntos)
+ *  No modifica los archivos originales · Reversible (borra la línea)
+ *  Respeta "reducir movimiento" del sistema
+ * ============================================================ */
 
 /* Evita que el deslizamiento muestre una barra horizontal.
    Usamos "clip" (no "hidden") para no romper el header pegajoso. */
 html { overflow-x: clip; }
- 
+
 /* Apagamos la entrada vertical anterior: ahora manda el deslizamiento. */
 .view.active { animation: none; }
- 
+
 /* Curva de desaceleración nativa (si no cargó styles-motion, usa este valor). */
 :root { --ease-nav: cubic-bezier(0.16, 1, 0.3, 1); }
- 
+
 /* Entrar hacia ADELANTE → la pantalla llega desde la derecha */
 .view.is-enter-fwd {
   animation: navInRight 0.34s var(--ease-nav, ease-out);
@@ -17,7 +28,7 @@ html { overflow-x: clip; }
   from { opacity: 0.55; transform: translateX(8%); }
   to   { opacity: 1;    transform: translateX(0);   }
 }
- 
+
 /* Volver ATRÁS → la pantalla llega desde la izquierda */
 .view.is-enter-back {
   animation: navInLeft 0.34s var(--ease-nav, ease-out);
