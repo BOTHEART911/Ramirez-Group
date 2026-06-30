@@ -4014,11 +4014,7 @@ bindModalCobro(p, st) {
     let pagos = [];
     if (st.metodo === 'EFECTIVO') {
       pagos.push({ metodo: 'EFECTIVO', valor: st.total });
-    } else if (st.metodo === 'TRANSFERENCIA') {
-      if (!st.comprobanteB64) {
-        Swal.showValidationMessage('Sube el comprobante de transferencia');
-        return false;
-      }
+} else if (st.metodo === 'TRANSFERENCIA') {
       pagos.push({ metodo: 'TRANSFERENCIA', valor: st.total, comprobanteUrl: null });
     } else if (st.metodo === 'MIXTO') {
       const ef = Number($('#cb-monto-ef').value) || 0;
@@ -4031,11 +4027,7 @@ bindModalCobro(p, st) {
         Swal.showValidationMessage(`La suma (${fmtPesos(ef + tr)}) no coincide con el total (${fmtPesos(st.total)})`);
         return false;
       }
-      if (!st.comprobanteB64) {
-        Swal.showValidationMessage('Sube el comprobante de transferencia');
-        return false;
-      }
-      pagos.push({ metodo: 'EFECTIVO',      valor: ef });
+     pagos.push({ metodo: 'EFECTIVO',      valor: ef });
       pagos.push({ metodo: 'TRANSFERENCIA', valor: tr, comprobanteUrl: null });
     }
    return {
